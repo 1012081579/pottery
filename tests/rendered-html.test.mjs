@@ -66,6 +66,8 @@ test("ships touch shaping, microphone, and manual-fire interactions without a gl
   assert.match(page, /onPointerDown=\{\(event\) => \{[\s\S]*?beginManualFire\(\);/);
   assert.match(page, /onPointerCancel=\{endManualFire\}/);
   assert.match(page, /aria-label="吹气或按住按钮烧制陶器"/);
+  assert.doesNotMatch(page, /className="canvas-hint"|className="fire-hint"/);
+  assert.doesNotMatch(css, /\.canvas-hint|\.fire-hint/);
   assert.match(page, /className="fire-meter"[\s\S]*?role="progressbar"/);
   assert.match(css, /\.fire-meter\s*\{[^}]*height:\s*1px;/s);
   assert.match(page, />Save<\/span>/);

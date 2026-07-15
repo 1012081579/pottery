@@ -131,20 +131,6 @@ canvas:focus-visible {
   user-select: none;
 }
 
-.canvas-hint {
-  position: absolute;
-  bottom: 10px;
-  left: 50%;
-  z-index: 3;
-  margin: 0;
-  transform: translateX(-50%);
-  color: var(--dim);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
 .control-panel {
   position: relative;
   z-index: 4;
@@ -201,15 +187,6 @@ canvas:focus-visible {
   transition: width 160ms ease;
 }
 
-.fire-hint {
-  min-height: 13px;
-  margin: 0;
-  color: var(--dim);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  line-height: 1.4;
-}
-
 .breath-button {
   min-height: 72px;
 }
@@ -231,8 +208,9 @@ canvas:focus-visible {
   background: transparent;
   color: var(--dim);
   cursor: pointer;
-  font-size: 9px;
-  letter-spacing: 0.16em;
+  font-family: var(--font-rubik-spray-paint), "Arial Rounded MT Bold", fantasy;
+  font-size: 25px;
+  letter-spacing: -0.02em;
 }
 
 .cooling-veil {
@@ -279,10 +257,6 @@ canvas:focus-visible {
 
   .poster-title {
     font-size: clamp(49px, 14vw, 64px);
-  }
-
-  .canvas-hint {
-    bottom: 4px;
   }
 
   .control-panel {

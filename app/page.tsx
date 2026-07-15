@@ -645,21 +645,21 @@ export default function Home() {
       : stage === "fire"
         ? "窑火与陶器，火焰会随吹气强度变化。"
         : "已经烧制完成的陶艺作品。";
-  const fireHint =
+  const microphoneAnnouncement =
     micStatus === "ready"
-      ? "吹气，或按住"
+      ? "麦克风已就绪，可以吹气；也可以按住按钮烧制。"
       : micStatus === "calibrating"
-        ? "保持安静片刻"
-        : micStatus === "denied" || micStatus === "unsupported"
-          ? "麦克风不可用 · 按住"
-          : "正在开启麦克风";
+        ? "正在校准麦克风，请保持安静片刻。"
+      : micStatus === "denied" || micStatus === "unsupported"
+          ? "麦克风不可用，请按住按钮烧制。"
+          : "正在开启麦克风。";
   const stageAnnouncement =
     stage === "shape"
       ? "塑形。左右拖动陶器轮廓。"
       : stage === "fire"
         ? cooling
           ? "烧制完成，陶器正在冷却。"
-          : `烧制。${fireHint}`
+          : `烧制。${microphoneAnnouncement}`
         : "陶器已经完成。";
 
   return (
@@ -681,9 +681,6 @@ export default function Home() {
               onPointerUp={handleCanvasPointerUp}
               onPointerCancel={handleCanvasPointerUp}
             />
-            {stage === "shape" && (
-              <p className="canvas-hint" aria-hidden="true">左右拖动塑形</p>
-            )}
             {cooling && (
               <div className="cooling-veil" role="status">
                 <span>Cooling</span>
@@ -718,8 +715,6 @@ export default function Home() {
                   >
                     <span style={{ width: `${progressPercent}%` }} />
                   </div>
-                  <p className="fire-hint" role="status">{fireHint}</p>
-
                   <button
                     type="button"
                     className={`breath-button ${manualActive ? "is-active" : ""}`}
