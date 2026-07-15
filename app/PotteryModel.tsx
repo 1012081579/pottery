@@ -100,7 +100,7 @@ function createPotTexture(
   const context = textureCanvas.getContext("2d");
   if (!context) return null;
 
-  context.fillStyle = "#f7f7f2";
+  context.fillStyle = "#ffffff";
   context.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
 
   const brushContext = brushLayer?.getContext("2d", {
@@ -245,7 +245,7 @@ export function PotteryModel({
       texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     }
     const gradientMap = new THREE.DataTexture(
-      new Uint8Array([58, 142, 236]),
+      new Uint8Array([196, 238, 255]),
       3,
       1,
       THREE.RedFormat,
@@ -255,7 +255,7 @@ export function PotteryModel({
     gradientMap.needsUpdate = true;
 
     const potteryMaterial = new THREE.MeshToonMaterial({
-      color: 0xf9f9f4,
+      color: 0xffffff,
       map: texture,
       gradientMap,
     });
@@ -271,7 +271,7 @@ export function PotteryModel({
     spinGroup.add(outline);
 
     const unmarkedMaterial = new THREE.MeshToonMaterial({
-      color: 0xf9f9f4,
+      color: 0xffffff,
       gradientMap,
       side: THREE.DoubleSide,
     });

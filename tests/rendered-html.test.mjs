@@ -216,11 +216,14 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   assert.match(model, /radius \* PROFILE_TO_WORLD/);
   assert.match(model, /new THREE\.LatheGeometry\(points, 96\)/);
   assert.match(model, /new THREE\.MeshToonMaterial\(\{/);
+  assert.match(model, /new Uint8Array\(\[196, 238, 255\]\)/);
+  assert.equal((model.match(/color: 0xffffff/g) ?? []).length, 2);
   assert.match(
     model,
     /const outlineMaterial = new THREE\.MeshBasicMaterial\(\{[\s\S]*?side: THREE\.BackSide,/,
   );
   assert.match(model, /new THREE\.CanvasTexture\(textureCanvas\)/);
+  assert.match(model, /context\.fillStyle = "#ffffff"/);
   assert.match(
     model,
     /for \(let textureY = 0; textureY < TEXTURE_SIZE; textureY \+= 1\)[\s\S]*?radiusAtCanvasY\(profile, canvasY\)[\s\S]*?const surfaceAngle = \(u - 0\.5\) \* Math\.PI \* 2;[\s\S]*?const canvasX = POT_CENTER \+ Math\.sin\(surfaceAngle\) \* radius;/,
