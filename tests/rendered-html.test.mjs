@@ -47,6 +47,7 @@ test("ships touch, glaze, microphone, and manual-fire interactions", async () =>
 
   assert.match(page, /<canvas/);
   assert.match(page, /onPointerDown=\{handleCanvasPointerDown\}/);
+  assert.doesNotMatch(page, /className="stage-body"\s+key=\{stage\}/);
   assert.match(page, /paintGlaze/);
   assert.match(page, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(page, /track\.stop\(\)/);

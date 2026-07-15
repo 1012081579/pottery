@@ -1192,7 +1192,7 @@ export default function Home() {
           })}
         </nav>
 
-        <div className="stage-body" key={stage}>
+        <div className="stage-body">
           <div className="stage-copy">
             <span>{copy.eyebrow}</span>
             <h1>{cooling ? "嘘，釉色正在冷却" : copy.title}</h1>
