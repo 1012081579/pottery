@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Rubik_Spray_Paint } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 
@@ -13,6 +13,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const rubikSprayPaint = Rubik_Spray_Paint({
+  variable: "--font-rubik-spray-paint",
+  subsets: ["latin"],
+  weight: "400",
+});
+
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") ?? "localhost:3000";
@@ -20,7 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = forwardedProtocol ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
   const title = "泥火间 · 指尖陶艺模拟器";
-  const description = "用手指塑形、自由上釉，再用真实吹气唤醒窑火，完成一件独一无二的数字陶器。";
+  const description = "用手指塑形，再用真实吹气唤醒窑火，完成一件独一无二的数字陶器。";
 
   return {
     title,
@@ -61,7 +67,7 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable}`}
+      className={`${geistSans.variable} ${geistMono.variable} ${rubikSprayPaint.variable}`}
     >
       <body className="antialiased">{children}</body>
     </html>

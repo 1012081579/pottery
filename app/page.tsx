@@ -3,16 +3,13 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-type Stage = "shape" | "glaze" | "fire" | "reveal";
-type GlazeKey = "celadon" | "moon" | "cobalt" | "persimmon";
+type Stage = "shape" | "fire" | "reveal";
 type MicStatus =
   | "idle"
   | "requesting"
@@ -23,7 +20,7 @@ type MicStatus =
 
 type PointerState = {
   down: boolean;
-  mode: "shape" | "glaze" | null;
+  mode: "shape" | null;
   x: number;
   y: number;
 };
@@ -35,63 +32,16 @@ type AudioState = {
   frame: number;
 };
 
-type Glaze = {
-  key: GlazeKey;
-  name: string;
-  note: string;
-  wet: string;
-  fired: string;
-  ring: string;
-};
-
 const CANVAS_WIDTH = 360;
 const CANVAS_HEIGHT = 440;
 const POT_CENTER = 180;
 const POT_TOP = 58;
 const POT_BOTTOM = 344;
 const PROFILE_COUNT = 32;
-
-const GLAZES: readonly Glaze[] = [
-  {
-    key: "celadon",
-    name: "雨过青",
-    note: "清透温润",
-    wet: "#67827e",
-    fired: "#7c9e95",
-    ring: "#425f5c",
-  },
-  {
-    key: "moon",
-    name: "月白",
-    note: "柔光乳浊",
-    wet: "#d5d0bd",
-    fired: "#e4dfcc",
-    ring: "#ada68f",
-  },
-  {
-    key: "cobalt",
-    name: "霁蓝",
-    note: "沉静深邃",
-    wet: "#38516c",
-    fired: "#284d72",
-    ring: "#1e354d",
-  },
-  {
-    key: "persimmon",
-    name: "柿红",
-    note: "铁锈流金",
-    wet: "#a35b3e",
-    fired: "#b55d3d",
-    ring: "#7a3829",
-  },
-] as const;
+const POT_VISUAL_SCALE = 1.32;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
-}
-
-function glazeByKey(key: GlazeKey) {
-  return GLAZES.find((glaze) => glaze.key === key) ?? GLAZES[0];
 }
 
 function makeProfile(kind: "cloud" | "column" | "gourd") {
@@ -135,248 +85,78 @@ const PRESETS = [
   { id: "gourd" as const, name: "葫芦" },
 ];
 
-function addSmoothCurve(
-  path: Path2D,
-  points: Array<{ x: number; y: number }>,
-) {
-  path.moveTo(points[0].x, points[0].y);
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previous = points[index - 1] ?? points[index];
-    const current = points[index];
-    const next = points[index + 1];
-    const afterNext = points[index + 2] ?? next;
-
-    path.bezierCurveTo(
-      current.x + (next.x - previous.x) / 6,
-      current.y + (next.y - previous.y) / 6,
-      next.x - (afterNext.x - current.x) / 6,
-      next.y - (afterNext.y - current.y) / 6,
-      next.x,
-      next.y,
-    );
-  }
+function edgeNoise(index: number, salt: number) {
+  const value =
+    Math.sin((index + 1) * 12.9898 + salt * 78.233) * 43758.5453;
+  return (value - Math.floor(value)) * 2 - 1;
 }
 
 function buildPotPath(profile: number[]) {
-  const step = (POT_BOTTOM - POT_TOP) / (profile.length - 1);
-  const left = profile.map((radius, index) => ({
-    x: POT_CENTER - radius,
-    y: POT_TOP + index * step,
-  }));
-  const right = profile
-    .map((radius, index) => ({
-      x: POT_CENTER + radius,
-      y: POT_TOP + index * step,
-    }))
-    .reverse();
+  const samplesPerSegment = 4;
+  const sampleCount = (profile.length - 1) * samplesPerSegment;
+  const pointsForSide = (side: -1 | 1, salt: number) =>
+    Array.from({ length: sampleCount + 1 }, (_, sample) => {
+      const position = sample / samplesPerSegment;
+      const index = Math.min(Math.floor(position), profile.length - 2);
+      const progress = sample === sampleCount ? 1 : position - index;
+      const radius =
+        profile[index] + (profile[index + 1] - profile[index]) * progress;
+      const y = POT_TOP + (sample / sampleCount) * (POT_BOTTOM - POT_TOP);
+      return {
+        x:
+          POT_CENTER +
+          side * (radius * POT_VISUAL_SCALE + edgeNoise(sample, salt) * 1.55),
+        y: y + edgeNoise(sample, salt + 17) * 0.68,
+      };
+    });
+
+  const left = pointsForSide(-1, 3);
+  const right = pointsForSide(1, 9).reverse();
   const path = new Path2D();
-  addSmoothCurve(path, [...left, ...right]);
+  path.moveTo(left[0].x, left[0].y);
+  [...left.slice(1), ...right].forEach((point) => path.lineTo(point.x, point.y));
   path.closePath();
   return path;
 }
 
-function hexToRgb(hex: string) {
-  const value = hex.replace("#", "");
-  return {
-    r: Number.parseInt(value.slice(0, 2), 16),
-    g: Number.parseInt(value.slice(2, 4), 16),
-    b: Number.parseInt(value.slice(4, 6), 16),
-  };
-}
-
-function mixHex(from: string, to: string, amount: number) {
-  const first = hexToRgb(from);
-  const second = hexToRgb(to);
-  const t = clamp(amount, 0, 1);
-  const channel = (start: number, end: number) =>
-    Math.round(start + (end - start) * t)
-      .toString(16)
-      .padStart(2, "0");
-  return `#${channel(first.r, second.r)}${channel(first.g, second.g)}${channel(first.b, second.b)}`;
-}
-
-function drawWheel(ctx: CanvasRenderingContext2D, time: number) {
-  const wheelY = POT_BOTTOM + 31;
-  const shadow = ctx.createRadialGradient(
-    POT_CENTER,
-    wheelY + 16,
-    12,
-    POT_CENTER,
-    wheelY + 16,
-    145,
-  );
-  shadow.addColorStop(0, "rgba(70, 48, 34, .28)");
-  shadow.addColorStop(1, "rgba(70, 48, 34, 0)");
-  ctx.fillStyle = shadow;
-  ctx.fillRect(25, wheelY - 10, 310, 75);
-
-  ctx.beginPath();
-  ctx.ellipse(POT_CENTER, wheelY + 18, 118, 27, 0, 0, Math.PI * 2);
-  ctx.fillStyle = "#7c6b5b";
-  ctx.fill();
-
-  const top = ctx.createLinearGradient(0, wheelY - 5, 0, wheelY + 22);
-  top.addColorStop(0, "#c8b6a0");
-  top.addColorStop(1, "#95816c");
-  ctx.beginPath();
-  ctx.ellipse(POT_CENTER, wheelY, 121, 25, 0, 0, Math.PI * 2);
-  ctx.fillStyle = top;
-  ctx.fill();
-
-  ctx.save();
-  ctx.translate(POT_CENTER, wheelY);
-  ctx.rotate(time * 0.00025);
-  ctx.strokeStyle = "rgba(255, 248, 235, .45)";
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 88, 16, 0, 0.15, 2.1);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 55, 10, 0, 3.2, 5.7);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawPot(
-  ctx: CanvasRenderingContext2D,
-  profile: number[],
-  bands: Array<GlazeKey | null>,
-  stage: Stage,
-  fireProgress: number,
-) {
+function drawPot(ctx: CanvasRenderingContext2D, profile: number[]) {
   const path = buildPotPath(profile);
-  const isFired = stage === "fire" || stage === "reveal";
-  const clayTop = isFired
-    ? mixHex("#a8664e", "#884433", fireProgress)
-    : "#c98261";
-  const clayEdge = isFired
-    ? mixHex("#82472f", "#5b2c24", fireProgress)
-    : "#8f4e39";
-  const body = ctx.createLinearGradient(
-    POT_CENTER - 118,
-    0,
-    POT_CENTER + 118,
-    0,
-  );
-  body.addColorStop(0, clayEdge);
-  body.addColorStop(0.18, clayTop);
-  body.addColorStop(0.48, mixHex(clayTop, "#f1c09a", 0.42));
-  body.addColorStop(0.72, clayTop);
-  body.addColorStop(1, clayEdge);
-  ctx.fillStyle = body;
+  const paper = "#f8f8f4";
+  ctx.fillStyle = paper;
   ctx.fill(path);
 
-  ctx.save();
-  ctx.clip(path);
-  const rowHeight = (POT_BOTTOM - POT_TOP) / bands.length + 1.5;
-  bands.forEach((key, index) => {
-    if (!key) return;
-    const glaze = glazeByKey(key);
-    const firedAmount = stage === "reveal" ? 1 : stage === "fire" ? fireProgress : 0;
-    ctx.fillStyle = mixHex(glaze.wet, glaze.fired, firedAmount);
-    ctx.fillRect(
-      0,
-      POT_TOP + index * ((POT_BOTTOM - POT_TOP) / bands.length),
-      CANVAS_WIDTH,
-      rowHeight,
-    );
-  });
-
-  const volume = ctx.createLinearGradient(
-    POT_CENTER - 130,
-    0,
-    POT_CENTER + 130,
-    0,
-  );
-  volume.addColorStop(0, "rgba(43, 24, 18, .32)");
-  volume.addColorStop(0.16, "rgba(80, 42, 28, .08)");
-  volume.addColorStop(0.42, "rgba(255, 244, 215, .2)");
-  volume.addColorStop(0.62, "rgba(255, 255, 255, .05)");
-  volume.addColorStop(1, "rgba(38, 22, 17, .32)");
-  ctx.fillStyle = volume;
-  ctx.fillRect(30, POT_TOP - 12, CANVAS_WIDTH - 60, POT_BOTTOM - POT_TOP + 30);
-
-  ctx.strokeStyle = "rgba(72, 37, 26, .13)";
-  ctx.lineWidth = 0.8;
-  for (let y = POT_TOP + 12; y < POT_BOTTOM; y += 9) {
-    ctx.beginPath();
-    ctx.moveTo(48, y);
-    ctx.quadraticCurveTo(POT_CENTER, y + 2.5, CANVAS_WIDTH - 48, y);
-    ctx.stroke();
-  }
-
-  if (bands.some(Boolean)) {
-    for (let index = 0; index < 54; index += 1) {
-      const x = 58 + ((index * 73) % 244);
-      const y = POT_TOP + ((index * 47) % Math.round(POT_BOTTOM - POT_TOP));
-      ctx.beginPath();
-      ctx.arc(x, y, index % 4 === 0 ? 1.1 : 0.65, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(46, 35, 29, .1)";
-      ctx.fill();
-    }
-  }
-  ctx.restore();
-
-  ctx.strokeStyle = isFired
-    ? "rgba(54, 27, 24, .58)"
-    : "rgba(92, 46, 34, .5)";
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(255, 255, 255, .94)";
+  ctx.lineWidth = 2.8;
   ctx.stroke(path);
 
-  const rimKey = bands[0];
-  const rimGlaze = rimKey ? glazeByKey(rimKey) : null;
-  const rimColor = rimGlaze
-    ? mixHex(
-        rimGlaze.wet,
-        rimGlaze.fired,
-        stage === "reveal" ? 1 : stage === "fire" ? fireProgress : 0,
-      )
-    : clayTop;
   ctx.beginPath();
-  ctx.ellipse(POT_CENTER, POT_TOP + 1, profile[0], 10.5, 0, 0, Math.PI * 2);
-  ctx.fillStyle = mixHex(rimColor, "#33251f", 0.18);
+  ctx.ellipse(
+    POT_CENTER,
+    POT_TOP + 1,
+    profile[0] * POT_VISUAL_SCALE,
+    10.5,
+    0,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fillStyle = paper;
   ctx.fill();
-  ctx.strokeStyle = "rgba(52, 29, 23, .55)";
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(255, 255, 255, .95)";
+  ctx.lineWidth = 2;
   ctx.stroke();
 
   ctx.beginPath();
   ctx.ellipse(
     POT_CENTER,
     POT_TOP + 1,
-    Math.max(12, profile[0] - 8),
+    Math.max(12, profile[0] * POT_VISUAL_SCALE - 8),
     6.3,
     0,
     0,
     Math.PI * 2,
   );
-  const mouth = ctx.createRadialGradient(
-    POT_CENTER,
-    POT_TOP,
-    2,
-    POT_CENTER,
-    POT_TOP,
-    profile[0],
-  );
-  mouth.addColorStop(0, "#2d211d");
-  mouth.addColorStop(0.65, "#4b3027");
-  mouth.addColorStop(1, mixHex(rimColor, "#291a16", 0.55));
-  ctx.fillStyle = mouth;
+  ctx.fillStyle = "#050505";
   ctx.fill();
-
-  ctx.save();
-  ctx.globalAlpha = 0.36;
-  ctx.strokeStyle = "#fff1dc";
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  profile.slice(2, -4).forEach((radius, index) => {
-    const y = POT_TOP + ((index + 2) / (profile.length - 1)) * (POT_BOTTOM - POT_TOP);
-    const x = POT_CENTER - radius * 0.58;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-  ctx.restore();
 }
 
 function drawFlames(
@@ -387,18 +167,20 @@ function drawFlames(
 ) {
   const baseY = foreground ? 395 : 380;
   const count = foreground ? 5 : 4;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
   for (let index = 0; index < count; index += 1) {
     const center = 60 + index * (foreground ? 62 : 78) + (foreground ? 0 : 14);
     const sway = Math.sin(time * 0.004 + index * 1.7) * (4 + power * 8);
     const height =
-      (foreground ? 62 : 92) +
-      power * (foreground ? 95 : 130) +
+      (foreground ? 28 : 42) +
+      power * (foreground ? 150 : 180) +
       Math.sin(time * 0.006 + index) * 14;
     const width = foreground ? 32 : 42;
     const flame = ctx.createLinearGradient(0, baseY, 0, baseY - height);
-    flame.addColorStop(0, foreground ? "rgba(255, 91, 24, .9)" : "rgba(213, 53, 20, .68)");
-    flame.addColorStop(0.45, foreground ? "rgba(255, 170, 48, .92)" : "rgba(255, 111, 24, .75)");
-    flame.addColorStop(1, "rgba(255, 231, 139, .06)");
+    flame.addColorStop(0, foreground ? "rgba(255, 59, 18, .92)" : "rgba(255, 59, 18, .62)");
+    flame.addColorStop(0.5, foreground ? "rgba(255, 149, 0, .96)" : "rgba(255, 116, 18, .72)");
+    flame.addColorStop(1, "rgba(255, 244, 207, .06)");
     ctx.beginPath();
     ctx.moveTo(center - width, baseY);
     ctx.bezierCurveTo(
@@ -421,15 +203,14 @@ function drawFlames(
     ctx.fillStyle = flame;
     ctx.fill();
   }
+  ctx.restore();
 }
 
 function drawKiln(
   ctx: CanvasRenderingContext2D,
   time: number,
   profile: number[],
-  bands: Array<GlazeKey | null>,
   power: number,
-  fireProgress: number,
 ) {
   const glow = ctx.createRadialGradient(
     POT_CENTER,
@@ -439,9 +220,9 @@ function drawKiln(
     245,
     225,
   );
-  glow.addColorStop(0, `rgba(255, 120, 42, ${0.18 + power * 0.34})`);
-  glow.addColorStop(0.48, "rgba(105, 39, 24, .28)");
-  glow.addColorStop(1, "rgba(20, 16, 16, 0)");
+  glow.addColorStop(0, `rgba(255, 95, 22, ${0.1 + power * 0.28})`);
+  glow.addColorStop(0.48, "rgba(255, 59, 18, .06)");
+  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
@@ -452,10 +233,10 @@ function drawKiln(
   ctx.bezierCurveTo(268, 18, 326, 66, 326, 184);
   ctx.lineTo(326, 415);
   ctx.closePath();
-  ctx.fillStyle = "#2c2422";
+  ctx.fillStyle = "#050505";
   ctx.fill();
-  ctx.strokeStyle = "rgba(145, 104, 82, .28)";
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(255, 255, 255, .62)";
+  ctx.lineWidth = 2.4;
   ctx.stroke();
 
   ctx.beginPath();
@@ -465,11 +246,14 @@ function drawKiln(
   ctx.bezierCurveTo(255, 45, 303, 88, 303, 191);
   ctx.lineTo(303, 408);
   ctx.closePath();
-  ctx.fillStyle = "#181719";
+  ctx.fillStyle = "#000000";
   ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, .15)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
   ctx.save();
-  ctx.strokeStyle = "rgba(129, 82, 64, .16)";
+  ctx.strokeStyle = "rgba(255, 255, 255, .08)";
   ctx.lineWidth = 1;
   for (let y = 92; y < 390; y += 42) {
     ctx.beginPath();
@@ -486,7 +270,7 @@ function drawKiln(
   ctx.restore();
 
   drawFlames(ctx, time, power, false);
-  drawPot(ctx, profile, bands, "fire", fireProgress);
+  drawPot(ctx, profile);
   drawFlames(ctx, time + 190, power, true);
 
   for (let index = 0; index < 11; index += 1) {
@@ -505,47 +289,30 @@ function drawStudio(
   ctx: CanvasRenderingContext2D,
   time: number,
   profile: number[],
-  bands: Array<GlazeKey | null>,
-  stage: Stage,
   pointer: PointerState,
 ) {
-  const halo = ctx.createRadialGradient(
-    POT_CENTER,
-    190,
-    20,
-    POT_CENTER,
-    210,
-    190,
-  );
-  halo.addColorStop(0, "rgba(255, 250, 233, .78)");
-  halo.addColorStop(1, "rgba(255, 250, 233, 0)");
-  ctx.fillStyle = halo;
-  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
   ctx.save();
   ctx.setLineDash([3, 8]);
-  ctx.strokeStyle = "rgba(117, 84, 59, .16)";
+  ctx.strokeStyle = "rgba(255, 255, 255, .08)";
   ctx.beginPath();
   ctx.moveTo(POT_CENTER, 33);
   ctx.lineTo(POT_CENTER, POT_BOTTOM + 8);
   ctx.stroke();
   ctx.restore();
 
-  drawWheel(ctx, time);
-  drawPot(ctx, profile, bands, stage, 0);
+  drawPot(ctx, profile);
 
   if (pointer.down) {
-    const radius = pointer.mode === "glaze" ? 18 : 14;
+    const radius = 14;
     const pulse = 2 + Math.sin(time * 0.01) * 2;
     ctx.beginPath();
     ctx.arc(pointer.x, pointer.y, radius + pulse, 0, Math.PI * 2);
-    ctx.strokeStyle =
-      pointer.mode === "glaze" ? "rgba(255, 250, 232, .78)" : "rgba(91, 48, 35, .48)";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255, 255, 255, .88)";
+    ctx.lineWidth = 1.6;
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(pointer.x, pointer.y, 3.2, 0, Math.PI * 2);
-    ctx.fillStyle = pointer.mode === "glaze" ? "#fff9eb" : "#70402f";
+    ctx.fillStyle = "#050505";
     ctx.fill();
   }
 }
@@ -554,7 +321,6 @@ function drawReveal(
   ctx: CanvasRenderingContext2D,
   time: number,
   profile: number[],
-  bands: Array<GlazeKey | null>,
 ) {
   const aura = ctx.createRadialGradient(
     POT_CENTER,
@@ -564,8 +330,8 @@ function drawReveal(
     210,
     205,
   );
-  aura.addColorStop(0, "rgba(255, 244, 210, .9)");
-  aura.addColorStop(0.56, "rgba(220, 187, 129, .24)");
+  aura.addColorStop(0, "rgba(255, 255, 255, .1)");
+  aura.addColorStop(0.56, "rgba(255, 255, 255, .025)");
   aura.addColorStop(1, "rgba(255, 255, 255, 0)");
   ctx.fillStyle = aura;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -573,7 +339,7 @@ function drawReveal(
   ctx.save();
   ctx.translate(POT_CENTER, 204);
   ctx.rotate(time * 0.00003);
-  ctx.strokeStyle = "rgba(151, 109, 61, .12)";
+  ctx.strokeStyle = "rgba(255, 255, 255, .09)";
   for (let index = 0; index < 18; index += 1) {
     ctx.rotate((Math.PI * 2) / 18);
     ctx.beginPath();
@@ -583,49 +349,40 @@ function drawReveal(
   }
   ctx.restore();
 
-  const pedestal = ctx.createLinearGradient(0, 368, 0, 412);
-  pedestal.addColorStop(0, "#c8b49b");
-  pedestal.addColorStop(1, "#8d7864");
   ctx.beginPath();
   ctx.ellipse(POT_CENTER, 387, 110, 25, 0, 0, Math.PI * 2);
-  ctx.fillStyle = pedestal;
+  ctx.fillStyle = "#030303";
   ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(POT_CENTER, 375, 110, 23, 0, 0, Math.PI * 2);
-  ctx.fillStyle = "#ded0bc";
-  ctx.fill();
-  drawPot(ctx, profile, bands, "reveal", 1);
+  ctx.strokeStyle = "rgba(255, 255, 255, .24)";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  drawPot(ctx, profile);
 
   for (let index = 0; index < 9; index += 1) {
     const x = 38 + ((index * 83) % 290);
     const y = 55 + ((index * 47 + time * 0.006) % 265);
     ctx.beginPath();
     ctx.arc(x, y, index % 2 ? 1.2 : 1.7, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(153, 112, 67, .2)";
+    ctx.fillStyle = "rgba(255, 255, 255, .2)";
     ctx.fill();
   }
 }
 
 const STAGE_COPY: Record<Stage, { eyebrow: string; title: string; description: string }> = {
   shape: {
-    eyebrow: "第一步 · 塑形",
-    title: "让泥土跟着手指呼吸",
-    description: "沿着陶坯边缘轻轻推拉，收窄口沿，或撑起一段饱满的器腹。",
-  },
-  glaze: {
-    eyebrow: "第二步 · 上釉",
-    title: "为器物披上一层颜色",
-    description: "选一味釉色，在器身上滑动。可以分段叠色，也可以整器浸釉。",
+    eyebrow: "STEP 01 · 塑形",
+    title: "用手指，给泥土一个轮廓",
+    description: "贴近器身左右推拉，收口或撑起器腹。",
   },
   fire: {
-    eyebrow: "第三步 · 烧制",
-    title: "以气息，唤醒窑火",
-    description: "对着麦克风短短吹几次。风越强，火越旺；累了就停下来。",
+    eyebrow: "STEP 02 · 烧制",
+    title: "吹气，让火变得更旺",
+    description: "对着麦克风吹气；气息越强，窑火越高。",
   },
   reveal: {
-    eyebrow: "开窑 · 完成",
-    title: "这件器物，只属于你",
-    description: "泥、釉、火与气息，在这一刻留下了独一无二的痕迹。",
+    eyebrow: "FINISHED · 开窑",
+    title: "你的陶器完成了",
+    description: "泥、手指、火与气息，留下了独一无二的痕迹。",
   },
 };
 
@@ -634,10 +391,6 @@ export default function Home() {
   const [stage, setStage] = useState<Stage>("shape");
   const [profile, setProfile] = useState<number[]>(() => [...INITIAL_PROFILE]);
   const [history, setHistory] = useState<number[][]>([]);
-  const [glazeBands, setGlazeBands] = useState<Array<GlazeKey | null>>(() =>
-    Array.from({ length: PROFILE_COUNT }, () => null),
-  );
-  const [selectedGlaze, setSelectedGlaze] = useState<GlazeKey>("celadon");
   const [micStatus, setMicStatus] = useState<MicStatus>("idle");
   const [firePower, setFirePower] = useState(0);
   const [fireProgress, setFireProgress] = useState(0);
@@ -646,7 +399,6 @@ export default function Home() {
 
   const stageRef = useRef(stage);
   const profileRef = useRef(profile);
-  const glazeBandsRef = useRef(glazeBands);
   const pointerRef = useRef<PointerState>({
     down: false,
     mode: null,
@@ -666,28 +418,6 @@ export default function Home() {
   const firePowerRef = useRef(0);
   const fireProgressRef = useRef(0);
   const coolingRef = useRef(false);
-
-  const glazedCount = useMemo(
-    () => glazeBands.filter(Boolean).length,
-    [glazeBands],
-  );
-  const glazeCoverage = glazedCount / PROFILE_COUNT;
-
-  const dominantGlaze = useMemo(() => {
-    const counts = new Map<GlazeKey, number>();
-    glazeBands.forEach((key) => {
-      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
-    });
-    let best: GlazeKey = selectedGlaze;
-    let bestCount = -1;
-    counts.forEach((count, key) => {
-      if (count > bestCount) {
-        best = key;
-        bestCount = count;
-      }
-    });
-    return glazeByKey(best);
-  }, [glazeBands, selectedGlaze]);
 
   const stopMicrophone = useCallback(() => {
     micRequestIdRef.current += 1;
@@ -734,24 +464,22 @@ export default function Home() {
     const paint = (time: number) => {
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      context.fillStyle = "#000000";
+      context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       if (stageRef.current === "fire") {
         drawKiln(
           context,
           time,
           profileRef.current,
-          glazeBandsRef.current,
           firePowerRef.current,
-          fireProgressRef.current,
         );
       } else if (stageRef.current === "reveal") {
-        drawReveal(context, time, profileRef.current, glazeBandsRef.current);
+        drawReveal(context, time, profileRef.current);
       } else {
         drawStudio(
           context,
           time,
           profileRef.current,
-          glazeBandsRef.current,
-          stageRef.current,
           pointerRef.current,
         );
       }
@@ -920,23 +648,10 @@ export default function Home() {
       0,
       PROFILE_COUNT - 1,
     );
-    return Math.abs(x - POT_CENTER) <= profileRef.current[index] + 28;
-  };
-
-  const paintGlaze = (x: number, y: number) => {
-    if (!isInsidePot(x, y)) return;
-    const index = clamp(
-      Math.round(((y - POT_TOP) / (POT_BOTTOM - POT_TOP)) * (PROFILE_COUNT - 1)),
-      0,
-      PROFILE_COUNT - 1,
+    return (
+      Math.abs(x - POT_CENTER) <=
+      profileRef.current[index] * POT_VISUAL_SCALE + 22
     );
-    const next = [...glazeBandsRef.current];
-    for (let offset = -2; offset <= 2; offset += 1) {
-      const target = index + offset;
-      if (target >= 0 && target < PROFILE_COUNT) next[target] = selectedGlaze;
-    }
-    glazeBandsRef.current = next;
-    setGlazeBands(next);
   };
 
   const shapeAtPoint = (x: number, y: number) => {
@@ -980,21 +695,17 @@ export default function Home() {
   const handleCanvasPointerDown = (
     event: ReactPointerEvent<HTMLCanvasElement>,
   ) => {
-    if (stage !== "shape" && stage !== "glaze") return;
+    if (stage !== "shape") return;
     const point = canvasPoint(event);
     if (!isInsidePot(point.x, point.y)) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    pointerRef.current = { down: true, mode: stage, ...point };
-    if (stage === "shape") {
-      gestureRef.current = {
-        lastX: point.x,
-        side: point.x >= POT_CENTER ? 1 : -1,
-        snapshot: [...profileRef.current],
-        changed: false,
-      };
-    } else {
-      paintGlaze(point.x, point.y);
-    }
+    pointerRef.current = { down: true, mode: "shape", ...point };
+    gestureRef.current = {
+      lastX: point.x,
+      side: point.x >= POT_CENTER ? 1 : -1,
+      snapshot: [...profileRef.current],
+      changed: false,
+    };
   };
 
   const handleCanvasPointerMove = (
@@ -1004,7 +715,6 @@ export default function Home() {
     const point = canvasPoint(event);
     pointerRef.current = { ...pointerRef.current, ...point };
     if (pointerRef.current.mode === "shape") shapeAtPoint(point.x, point.y);
-    if (pointerRef.current.mode === "glaze") paintGlaze(point.x, point.y);
   };
 
   const handleCanvasPointerUp = (
@@ -1039,15 +749,6 @@ export default function Home() {
     setProfile(next);
   };
 
-  const dipWholePiece = () => {
-    const next = Array.from(
-      { length: PROFILE_COUNT },
-      () => selectedGlaze as GlazeKey,
-    );
-    glazeBandsRef.current = next;
-    setGlazeBands(next);
-  };
-
   const enterFire = () => {
     stopMicrophone();
     firePowerRef.current = 0;
@@ -1074,7 +775,7 @@ export default function Home() {
     setFireProgress(0);
     setCooling(false);
     setMicStatus("idle");
-    setStage("glaze");
+    setStage("shape");
   };
 
   const beginManualFire = () => {
@@ -1105,18 +806,14 @@ export default function Home() {
   const restart = () => {
     stopMicrophone();
     const nextProfile = [...INITIAL_PROFILE];
-    const nextBands = Array.from({ length: PROFILE_COUNT }, () => null);
     profileRef.current = nextProfile;
-    glazeBandsRef.current = nextBands;
     fireProgressRef.current = 0;
     firePowerRef.current = 0;
     micPowerRef.current = 0;
     manualPowerRef.current = 0;
     coolingRef.current = false;
     setProfile(nextProfile);
-    setGlazeBands(nextBands);
     setHistory([]);
-    setSelectedGlaze("celadon");
     setMicStatus("idle");
     setFireProgress(0);
     setFirePower(0);
@@ -1129,7 +826,7 @@ export default function Home() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const link = document.createElement("a");
-    link.download = `泥火间-${dominantGlaze.name}.png`;
+    link.download = "泥火间-手塑陶器.png";
     link.href = canvas.toDataURL("image/png");
     link.click();
   };
@@ -1139,44 +836,29 @@ export default function Home() {
     Math.round(24 + 1210 * Math.pow(fireProgress, 0.72) + firePower * 46),
   );
   const progressPercent = Math.round(fireProgress * 100);
-  const stepIndex = stage === "shape" ? 0 : stage === "glaze" ? 1 : 2;
+  const stepIndex = stage === "shape" ? 0 : 1;
   const copy = STAGE_COPY[stage];
   const canvasLabel =
     stage === "shape"
       ? "可触摸塑形的陶坯。沿器身左右拖动改变轮廓。"
-      : stage === "glaze"
-        ? "可触摸上釉的陶器。在器身上下滑动涂抹所选釉色。"
-        : stage === "fire"
-          ? "窑火与陶器，火焰会随吹气强度变化。"
-          : "已经烧制完成的陶艺作品。";
+      : stage === "fire"
+        ? "窑火与陶器，火焰会随吹气强度变化。"
+        : "已经烧制完成的陶艺作品。";
 
   return (
     <main className={`experience stage-${stage}`}>
-      <aside className="ambient-copy" aria-hidden="true">
-        <div className="ambient-mark">泥火间</div>
-        <div className="ambient-words">
-          <span>泥</span>
-          <span>火</span>
-          <span>息</span>
-        </div>
-        <p>用双手留住形，用一口气唤醒火。</p>
-        <div className="ambient-index">DIGITAL POTTERY · 001</div>
-      </aside>
-
       <section className="studio-shell" aria-label="泥火间陶艺工作室">
         <header className="topbar">
           <div className="brand-lockup">
-            <span className="brand-seal" aria-hidden="true">泥</span>
-            <span>
-              <strong>泥火间</strong>
-              <small>NÍ HUǑ JIĀN</small>
-            </span>
+            <strong className="poster-title">Pottery</strong>
           </div>
-          <span className="piece-number">作品 001</span>
+          <span className="piece-number" aria-label={`第 ${stepIndex + 1} 步`}>
+            0{stepIndex + 1} / 02
+          </span>
         </header>
 
         <nav className="process" aria-label="制作进度">
-          {["塑形", "上釉", "烧制"].map((label, index) => {
+          {["塑形", "烧制"].map((label, index) => {
             const completed = stage === "reveal" || index < stepIndex;
             const active = stage !== "reveal" && index === stepIndex;
             return (
@@ -1195,7 +877,7 @@ export default function Home() {
         <div className="stage-body">
           <div className="stage-copy">
             <span>{copy.eyebrow}</span>
-            <h1>{cooling ? "嘘，釉色正在冷却" : copy.title}</h1>
+            <h1>{cooling ? "嘘，陶器正在冷却" : copy.title}</h1>
             <p>{cooling ? "最后一点火光正在退去，开窑就在片刻之后。" : copy.description}</p>
           </div>
 
@@ -1214,12 +896,6 @@ export default function Home() {
               <div className="gesture-hint" aria-hidden="true">
                 <span className="gesture-finger" />
                 <span>贴近器身 · 左右推拉</span>
-              </div>
-            )}
-            {stage === "glaze" && glazeCoverage < 0.08 && (
-              <div className="gesture-hint glaze-hint" aria-hidden="true">
-                <span className="gesture-finger" />
-                <span>在器身上滑动上釉</span>
               </div>
             )}
             {cooling && (
@@ -1271,67 +947,12 @@ export default function Home() {
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setStage("glaze")}
+                onClick={enterFire}
+                aria-label="完成塑形，入窑烧制"
               >
-                <span>完成塑形</span>
-                <span aria-hidden="true">去上釉&nbsp; →</span>
+                <span className="action-word" aria-hidden="true">Finish</span>
+                <small>完成塑形 · 入窑烧制</small>
               </button>
-            </div>
-          )}
-
-          {stage === "glaze" && (
-            <div className="control-panel glaze-controls">
-              <div className="glaze-heading">
-                <span className="micro-label">釉色盘</span>
-                <button type="button" className="text-button" onClick={dipWholePiece}>
-                  整器浸釉
-                </button>
-              </div>
-              <div className="glaze-palette" role="radiogroup" aria-label="选择釉色">
-                {GLAZES.map((glaze) => {
-                  const selected = glaze.key === selectedGlaze;
-                  return (
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      className={`glaze-choice ${selected ? "is-selected" : ""}`}
-                      style={{
-                        "--glaze": glaze.fired,
-                        "--glaze-ring": glaze.ring,
-                      } as CSSProperties}
-                      onClick={() => setSelectedGlaze(glaze.key)}
-                      key={glaze.key}
-                    >
-                      <span className="glaze-swatch">{selected ? "✓" : ""}</span>
-                      <span>
-                        <strong>{glaze.name}</strong>
-                        <small>{glaze.note}</small>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="coverage-row" aria-label={`上釉完成 ${Math.round(glazeCoverage * 100)}%`}>
-                <span>上釉覆盖</span>
-                <span className="coverage-track">
-                  <span style={{ width: `${glazeCoverage * 100}%` }} />
-                </span>
-                <strong>{Math.round(glazeCoverage * 100)}%</strong>
-              </div>
-              <div className="dual-actions">
-                <button type="button" className="secondary-button" onClick={() => setStage("shape")}>
-                  上一步
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={enterFire}
-                  disabled={glazedCount === 0}
-                >
-                  入窑烧制 <span aria-hidden="true">→</span>
-                </button>
-              </div>
             </div>
           )}
 
@@ -1404,13 +1025,13 @@ export default function Home() {
                   >
                     <span className="breath-rings" aria-hidden="true"><i /><i /><i /></span>
                     <span>
-                      <strong>{manualActive ? "火正旺" : "按住鼓风"}</strong>
-                      <small>麦克风的触控备用方式</small>
+                      <strong className="action-word">{manualActive ? "Burn" : "Blow"}</strong>
+                      <small>{manualActive ? "火正旺" : "按住鼓风 · 触控备用"}</small>
                     </span>
                   </button>
                   {fireProgress === 0 && (
                     <button type="button" className="back-link" onClick={leaveFire}>
-                      返回上釉
+                      返回塑形
                     </button>
                   )}
                 </>
@@ -1421,16 +1042,18 @@ export default function Home() {
           {stage === "reveal" && (
             <div className="control-panel reveal-controls">
               <div className="result-stats">
-                <div><span>主釉色</span><strong>{dominantGlaze.name}</strong></div>
+                <div><span>成型方式</span><strong>手指塑形</strong></div>
                 <div><span>烧成温度</span><strong>1,280°C</strong></div>
                 <div><span>器物编号</span><strong>NHJ · 001</strong></div>
               </div>
               <div className="dual-actions result-actions">
                 <button type="button" className="secondary-button" onClick={restart}>
-                  再做一件
+                  <span className="action-word">Again</span>
+                  <small>再做一件</small>
                 </button>
-                <button type="button" className="primary-button" onClick={savePiece}>
-                  保存成品 <span aria-hidden="true">↓</span>
+                <button type="button" className="primary-button" onClick={savePiece} aria-label="保存成品图片">
+                  <span className="action-word" aria-hidden="true">Save</span>
+                  <small>保存成品图片</small>
                 </button>
               </div>
             </div>

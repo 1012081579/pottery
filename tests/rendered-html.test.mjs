@@ -31,13 +31,15 @@ test("server-renders the pottery studio shell and metadata", async () => {
   const html = await response.text();
   assert.match(html, /<html lang="zh-CN"/i);
   assert.match(html, /<title>泥火间 · 指尖陶艺模拟器<\/title>/i);
-  assert.match(html, /泥火间/);
-  assert.match(html, /让泥土跟着手指呼吸/);
+  assert.match(html, /Pottery/);
+  assert.match(html, /STEP 01 · 塑形/);
+  assert.match(html, /Finish/);
   assert.match(html, /制作进度/);
+  assert.doesNotMatch(html, /上釉|釉色|glaze/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("ships touch, glaze, microphone, and manual-fire interactions", async () => {
+test("ships touch shaping, microphone, and manual-fire interactions without a glaze stage", async () => {
   const [page, layout, css, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -47,12 +49,18 @@ test("ships touch, glaze, microphone, and manual-fire interactions", async () =>
 
   assert.match(page, /<canvas/);
   assert.match(page, /onPointerDown=\{handleCanvasPointerDown\}/);
+  assert.match(page, /onPointerMove=\{handleCanvasPointerMove\}/);
   assert.doesNotMatch(page, /className="stage-body"\s+key=\{stage\}/);
-  assert.match(page, /paintGlaze/);
+  assert.match(page, /type Stage = "shape" \| "fire" \| "reveal"/);
+  assert.match(page, /setStage\("fire"\)/);
+  assert.match(page, /buildPotPath/);
+  assert.match(page, /ctx\.fill\(path\)/);
   assert.match(page, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(page, /track\.stop\(\)/);
   assert.match(page, /按住鼓风/);
   assert.match(page, /onPointerCancel=\{endManualFire\}/);
+  assert.doesNotMatch(page, /for\s*\(let y = POT_TOP \+ 12; y < POT_BOTTOM; y \+= 11\)/);
+  assert.doesNotMatch(`${page}\n${layout}\n${css}`, /glaze|上釉|釉色/i);
   assert.match(layout, /lang="zh-CN"/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
