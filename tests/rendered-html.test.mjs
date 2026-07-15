@@ -175,16 +175,28 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
     model,
     /const MODEL_Y_OFFSET =[\s\S]*?WORLD_PER_CANVAS_PIXEL/,
   );
-  assert.match(model, /const RIM_PRESENTATION_TILT = 0\.12/);
-  assert.doesNotMatch(model, /group\.rotation\.x\s*=/);
-  assert.match(model, /let targetTilt = 0;/);
+  assert.match(model, /const INITIAL_TILT = 0\.12/);
+  assert.doesNotMatch(model, /RIM_PRESENTATION_TILT/);
   assert.match(
     model,
-    /rim\.rotation\.x = Math\.PI \/ 2 - RIM_PRESENTATION_TILT/,
+    /function projectedBodyBounds\([\s\S]*?const cosine = Math\.cos\(tilt\);[\s\S]*?const sine = Math\.abs\(Math\.sin\(tilt\)\);[\s\S]*?return \{ minimum, maximum \};/,
   );
   assert.match(
     model,
-    /mouth\.rotation\.x = -Math\.PI \/ 2 \+ RIM_PRESENTATION_TILT/,
+    /function fitInitialPresentation\(profile: number\[\]\) \{[\s\S]*?projectedBodyBounds\(profile, candidate, INITIAL_TILT\)[\s\S]*?projectedBodyBounds\(profile, verticalScale, INITIAL_TILT\)[\s\S]*?projectedCenter:/,
+  );
+  assert.match(
+    model,
+    /const presentation = fitInitialPresentation\(profile\);[\s\S]*?const tiltGroup = new THREE\.Group\(\);[\s\S]*?tiltGroup\.rotation\.x = INITIAL_TILT;[\s\S]*?tiltGroup\.scale\.y = presentation\.verticalScale;[\s\S]*?tiltGroup\.position\.y = MODEL_Y_OFFSET - presentation\.projectedCenter;[\s\S]*?scene\.add\(tiltGroup\);/,
+  );
+  assert.match(
+    model,
+    /const spinGroup = new THREE\.Group\(\);[\s\S]*?spinGroup\.rotation\.y = Math\.PI;[\s\S]*?tiltGroup\.add\(spinGroup\);/,
+  );
+  assert.match(model, /let targetTilt = INITIAL_TILT;/);
+  assert.match(
+    model,
+    /spinGroup\.rotation\.y \+=[\s\S]*?targetRotation - spinGroup\.rotation\.y[\s\S]*?tiltGroup\.rotation\.x \+= \(targetTilt - tiltGroup\.rotation\.x\)/,
   );
   assert.doesNotMatch(model, /const radialScale\s*=/);
   assert.match(model, /const points = profile[\s\S]*?new THREE\.Vector2\(/);
@@ -202,12 +214,55 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   );
   assert.match(
     model,
-    /const unmarkedMaterial = new THREE\.MeshToonMaterial\(\{[\s\S]*?gradientMap,[\s\S]*?\}\);/,
+    /const unmarkedMaterial = new THREE\.MeshToonMaterial\(\{[\s\S]*?gradientMap,[\s\S]*?side: THREE\.DoubleSide,[\s\S]*?\}\);/,
   );
+  assert.match(model, /const openingRadius = Math\.max\(0\.025, topRadius \* 0\.82\)/);
+  assert.doesNotMatch(model, /rimWallThickness/);
+  assert.match(
+    model,
+    /const rimHeightInCanvasPixels = clamp\([\s\S]*?profile\[0\] \* POT_VISUAL_SCALE \* 0\.18,[\s\S]*?3,[\s\S]*?10\.5,[\s\S]*?\);/,
+  );
+  assert.match(
+    model,
+    /const collarHeight =[\s\S]*?Math\.max\(0, rimHeightInCanvasPixels - 1\) \* WORLD_PER_CANVAS_PIXEL[\s\S]*?presentation\.verticalScale \* Math\.cos\(INITIAL_TILT\)/,
+  );
+  assert.match(model, /const rimY = topY \+ collarHeight/);
+  assert.match(
+    model,
+    /const collarGeometry = new THREE\.CylinderGeometry\([\s\S]*?topRadius,[\s\S]*?topRadius,[\s\S]*?collarHeight,[\s\S]*?72,[\s\S]*?1,[\s\S]*?true,[\s\S]*?\);/,
+  );
+  assert.match(model, /const collar = new THREE\.Mesh\(collarGeometry, unmarkedMaterial\)/);
+  assert.match(model, /collar\.position\.y = topY \+ collarHeight \* 0\.5/);
+  assert.match(model, /spinGroup\.add\(collar\)/);
+  assert.match(
+    model,
+    /const rimGeometry = new THREE\.RingGeometry\([\s\S]*?openingRadius,[\s\S]*?topRadius,[\s\S]*?72,[\s\S]*?\);/,
+  );
+  assert.doesNotMatch(model, /TorusGeometry|rimTubeRadius|rimMajorRadius/);
   assert.match(model, /const rim = new THREE\.Mesh\(rimGeometry, unmarkedMaterial\)/);
+  assert.match(model, /rim\.rotation\.x = -Math\.PI \/ 2;/);
+  assert.match(model, /rim\.position\.y = rimY/);
+  assert.match(
+    model,
+    /const interiorGeometry = new THREE\.CylinderGeometry\([\s\S]*?openingRadius,[\s\S]*?openingRadius \* 0\.94,[\s\S]*?interiorDepth,[\s\S]*?true,[\s\S]*?\);/,
+  );
+  assert.match(
+    model,
+    /const interiorMaterial = new THREE\.MeshBasicMaterial\(\{[\s\S]*?side: THREE\.BackSide,/,
+  );
+  assert.match(
+    model,
+    /interior\.position\.y = rimY - interiorDepth \* 0\.5 - 0\.006/,
+  );
+  assert.match(
+    model,
+    /const mouthGeometry = new THREE\.CircleGeometry\(openingRadius \* 0\.94, 72\)/,
+  );
+  assert.match(model, /mouth\.rotation\.x = -Math\.PI \/ 2;/);
+  assert.match(model, /mouth\.position\.y = rimY - interiorDepth - 0\.008/);
   assert.match(model, /const bottomGeometry = new THREE\.CircleGeometry\(bottomRadius, 72\)/);
   assert.match(model, /const bottom = new THREE\.Mesh\(bottomGeometry, unmarkedMaterial\)/);
-  assert.match(model, /group\.add\(bottom\)/);
+  assert.match(model, /spinGroup\.add\(bottom\)/);
   assert.match(model, /targetRotation \+= \(event\.clientX - lastX\) \* 0\.012/);
   assert.match(model, /canvas\.addEventListener\("pointermove", handlePointerMove\)/);
   assert.match(model, /canvas\.addEventListener\("lostpointercapture", endDrag\)/);
@@ -257,10 +312,16 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   );
   assert.doesNotMatch(model, /modelState|setModelState/);
   assert.match(model, /geometry\.dispose\(\)/);
+  assert.match(model, /collarGeometry\.dispose\(\)/);
+  assert.match(model, /rimGeometry\.dispose\(\)/);
+  assert.match(model, /interiorGeometry\.dispose\(\)/);
+  assert.match(model, /mouthGeometry\.dispose\(\)/);
   assert.match(model, /bottomGeometry\.dispose\(\)/);
   assert.match(model, /potteryMaterial\.dispose\(\)/);
   assert.match(model, /unmarkedMaterial\.dispose\(\)/);
   assert.match(model, /outlineMaterial\.dispose\(\)/);
+  assert.match(model, /interiorMaterial\.dispose\(\)/);
+  assert.match(model, /mouthMaterial\.dispose\(\)/);
   assert.match(model, /texture\?\.dispose\(\)/);
   assert.match(model, /renderer\.dispose\(\)/);
 

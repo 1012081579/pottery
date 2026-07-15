@@ -23,7 +23,7 @@ const INITIAL_PROFILE_MAX = 111.614991651;
 const PROFILE_TO_WORLD = 1.22 / INITIAL_PROFILE_MAX;
 const WORLD_PER_CANVAS_PIXEL = PROFILE_TO_WORLD / POT_VISUAL_SCALE;
 const MAX_TILT = 0.28;
-const RIM_PRESENTATION_TILT = 0.12;
+const INITIAL_TILT = 0.12;
 const MODEL_HEIGHT = (POT_BOTTOM - POT_TOP) * WORLD_PER_CANVAS_PIXEL;
 const MODEL_Y_OFFSET =
   (CANVAS_HEIGHT * 0.5 - (POT_TOP + POT_BOTTOM) * 0.5) *
@@ -44,6 +44,50 @@ function radiusAtCanvasY(profile: number[], canvasY: number) {
     profile[lowerIndex] +
     (profile[upperIndex] - profile[lowerIndex]) * progress
   );
+}
+
+function projectedBodyBounds(
+  profile: number[],
+  verticalScale: number,
+  tilt: number,
+) {
+  const cosine = Math.cos(tilt);
+  const sine = Math.abs(Math.sin(tilt));
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+
+  profile.forEach((radius, index) => {
+    const progress = index / Math.max(1, profile.length - 1);
+    const y = MODEL_HEIGHT * 0.5 - progress * MODEL_HEIGHT;
+    const projectedCenter = y * verticalScale * cosine;
+    const projectedRadius =
+      Math.max(0.06, radius * PROFILE_TO_WORLD) * sine;
+    minimum = Math.min(minimum, projectedCenter - projectedRadius);
+    maximum = Math.max(maximum, projectedCenter + projectedRadius);
+  });
+
+  return { minimum, maximum };
+}
+
+function fitInitialPresentation(profile: number[]) {
+  let lowerScale = 0.72;
+  let upperScale = 1;
+  for (let iteration = 0; iteration < 18; iteration += 1) {
+    const candidate = (lowerScale + upperScale) * 0.5;
+    const bounds = projectedBodyBounds(profile, candidate, INITIAL_TILT);
+    if (bounds.maximum - bounds.minimum > MODEL_HEIGHT) {
+      upperScale = candidate;
+    } else {
+      lowerScale = candidate;
+    }
+  }
+
+  const verticalScale = (lowerScale + upperScale) * 0.5;
+  const bounds = projectedBodyBounds(profile, verticalScale, INITIAL_TILT);
+  return {
+    verticalScale,
+    projectedCenter: (bounds.minimum + bounds.maximum) * 0.5,
+  };
 }
 
 function createPotTexture(
@@ -172,10 +216,16 @@ export function PotteryModel({
     camera.position.set(0, 0, 8);
     camera.lookAt(0, 0, 0);
 
-    const group = new THREE.Group();
-    group.rotation.y = Math.PI;
-    group.position.y = MODEL_Y_OFFSET;
-    scene.add(group);
+    const presentation = fitInitialPresentation(profile);
+    const tiltGroup = new THREE.Group();
+    tiltGroup.rotation.x = INITIAL_TILT;
+    tiltGroup.scale.y = presentation.verticalScale;
+    tiltGroup.position.y = MODEL_Y_OFFSET - presentation.projectedCenter;
+    scene.add(tiltGroup);
+
+    const spinGroup = new THREE.Group();
+    spinGroup.rotation.y = Math.PI;
+    tiltGroup.add(spinGroup);
 
     const points = profile
       .map((radius, index) => {
@@ -210,7 +260,7 @@ export function PotteryModel({
       gradientMap,
     });
     const pot = new THREE.Mesh(geometry, potteryMaterial);
-    group.add(pot);
+    spinGroup.add(pot);
 
     const outlineMaterial = new THREE.MeshBasicMaterial({
       color: 0x34322f,
@@ -218,26 +268,71 @@ export function PotteryModel({
     });
     const outline = new THREE.Mesh(geometry, outlineMaterial);
     outline.scale.set(1.018, 1.006, 1.018);
-    group.add(outline);
+    spinGroup.add(outline);
 
     const unmarkedMaterial = new THREE.MeshToonMaterial({
       color: 0xf9f9f4,
       gradientMap,
+      side: THREE.DoubleSide,
     });
     const topRadius = Math.max(0.06, profile[0] * PROFILE_TO_WORLD);
     const topY = MODEL_HEIGHT * 0.5;
-    const rimGeometry = new THREE.TorusGeometry(topRadius, 0.035, 12, 72);
-    const rim = new THREE.Mesh(rimGeometry, unmarkedMaterial);
-    rim.rotation.x = Math.PI / 2 - RIM_PRESENTATION_TILT;
-    rim.position.y = topY;
-    group.add(rim);
+    const openingRadius = Math.max(0.025, topRadius * 0.82);
+    const rimHeightInCanvasPixels = clamp(
+      profile[0] * POT_VISUAL_SCALE * 0.18,
+      3,
+      10.5,
+    );
+    const collarHeight =
+      (Math.max(0, rimHeightInCanvasPixels - 1) * WORLD_PER_CANVAS_PIXEL) /
+      (presentation.verticalScale * Math.cos(INITIAL_TILT));
+    const rimY = topY + collarHeight;
 
-    const mouthGeometry = new THREE.CircleGeometry(topRadius * 0.82, 72);
+    const collarGeometry = new THREE.CylinderGeometry(
+      topRadius,
+      topRadius,
+      collarHeight,
+      72,
+      1,
+      true,
+    );
+    const collar = new THREE.Mesh(collarGeometry, unmarkedMaterial);
+    collar.position.y = topY + collarHeight * 0.5;
+    spinGroup.add(collar);
+
+    const rimGeometry = new THREE.RingGeometry(
+      openingRadius,
+      topRadius,
+      72,
+    );
+    const rim = new THREE.Mesh(rimGeometry, unmarkedMaterial);
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.y = rimY;
+    spinGroup.add(rim);
+
+    const interiorDepth = clamp(topRadius * 0.3, 0.06, 0.14);
+    const interiorGeometry = new THREE.CylinderGeometry(
+      openingRadius,
+      openingRadius * 0.94,
+      interiorDepth,
+      72,
+      1,
+      true,
+    );
+    const interiorMaterial = new THREE.MeshBasicMaterial({
+      color: 0x11100e,
+      side: THREE.BackSide,
+    });
+    const interior = new THREE.Mesh(interiorGeometry, interiorMaterial);
+    interior.position.y = rimY - interiorDepth * 0.5 - 0.006;
+    spinGroup.add(interior);
+
+    const mouthGeometry = new THREE.CircleGeometry(openingRadius * 0.94, 72);
     const mouthMaterial = new THREE.MeshBasicMaterial({ color: 0x030303 });
     const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
-    mouth.rotation.x = -Math.PI / 2 + RIM_PRESENTATION_TILT;
-    mouth.position.y = topY - 0.018;
-    group.add(mouth);
+    mouth.rotation.x = -Math.PI / 2;
+    mouth.position.y = rimY - interiorDepth - 0.008;
+    spinGroup.add(mouth);
 
     const bottomRadius = Math.max(
       0.06,
@@ -247,7 +342,7 @@ export function PotteryModel({
     const bottom = new THREE.Mesh(bottomGeometry, unmarkedMaterial);
     bottom.rotation.x = Math.PI / 2;
     bottom.position.y = -MODEL_HEIGHT * 0.5 + 0.004;
-    group.add(bottom);
+    spinGroup.add(bottom);
 
     scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 0.62));
     const keyLight = new THREE.DirectionalLight(0xffffff, 1.28);
@@ -258,7 +353,7 @@ export function PotteryModel({
     scene.add(rimLight);
 
     let targetRotation = Math.PI;
-    let targetTilt = 0;
+    let targetTilt = INITIAL_TILT;
     let dragging = false;
     let activePointerId: number | null = null;
     let lastX = 0;
@@ -361,8 +456,9 @@ export function PotteryModel({
       const delta = Math.min((time - lastFrameTime) / 1000, 0.05);
       lastFrameTime = time;
       if (!dragging && !reduceMotion) targetRotation += delta * 0.09;
-      group.rotation.y += (targetRotation - group.rotation.y) * 0.11;
-      group.rotation.x += (targetTilt - group.rotation.x) * 0.11;
+      spinGroup.rotation.y +=
+        (targetRotation - spinGroup.rotation.y) * 0.11;
+      tiltGroup.rotation.x += (targetTilt - tiltGroup.rotation.x) * 0.11;
       renderer.render(scene, camera);
       frame = requestAnimationFrame(render);
     };
@@ -384,12 +480,15 @@ export function PotteryModel({
       canvas.removeEventListener("lostpointercapture", endDrag);
       canvas.removeEventListener("keydown", handleKeyDown);
       geometry.dispose();
+      collarGeometry.dispose();
       rimGeometry.dispose();
+      interiorGeometry.dispose();
       mouthGeometry.dispose();
       bottomGeometry.dispose();
       potteryMaterial.dispose();
       unmarkedMaterial.dispose();
       outlineMaterial.dispose();
+      interiorMaterial.dispose();
       mouthMaterial.dispose();
       texture?.dispose();
       gradientMap.dispose();
