@@ -32,9 +32,8 @@ test("server-renders the pottery studio shell and metadata", async () => {
   assert.match(html, /<html lang="zh-CN"/i);
   assert.match(html, /<title>泥火间 · 指尖陶艺模拟器<\/title>/i);
   assert.match(html, /Pottery/);
-  assert.match(html, /STEP 01 · 塑形/);
   assert.match(html, /Finish/);
-  assert.match(html, /制作进度/);
+  assert.doesNotMatch(html, /STEP|制作进度|窑温|器物编号/i);
   assert.doesNotMatch(html, /上釉|釉色|glaze/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
@@ -53,12 +52,24 @@ test("ships touch shaping, microphone, and manual-fire interactions without a gl
   assert.doesNotMatch(page, /className="stage-body"\s+key=\{stage\}/);
   assert.match(page, /type Stage = "shape" \| "fire" \| "reveal"/);
   assert.match(page, /setStage\("fire"\)/);
+  assert.match(
+    page,
+    /const enterFire = \(\) => \{[\s\S]*?setStage\("fire"\);[\s\S]*?void startMicrophone\(\);[\s\S]*?\n  \};/,
+  );
   assert.match(page, /buildPotPath/);
   assert.match(page, /ctx\.fill\(path\)/);
+  assert.match(page, /const minimum = index < 4 \? 8 : 10/);
+  assert.match(page, /Math\.max\(2\.5, rimRadius \* 0\.82\)/);
   assert.match(page, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(page, /track\.stop\(\)/);
-  assert.match(page, /按住鼓风/);
+  assert.match(page, /manualPowerRef\.current = 1/);
+  assert.match(page, /onPointerDown=\{\(event\) => \{[\s\S]*?beginManualFire\(\);/);
   assert.match(page, /onPointerCancel=\{endManualFire\}/);
+  assert.match(page, /aria-label="吹气或按住按钮烧制陶器"/);
+  assert.match(page, /className="fire-meter"[\s\S]*?role="progressbar"/);
+  assert.match(css, /\.fire-meter\s*\{[^}]*height:\s*1px;/s);
+  assert.match(page, />Save<\/span>/);
+  assert.match(page, />\s*Again\s*<\/button>/);
   assert.doesNotMatch(page, /for\s*\(let y = POT_TOP \+ 12; y < POT_BOTTOM; y \+= 11\)/);
   assert.doesNotMatch(`${page}\n${layout}\n${css}`, /glaze|上釉|釉色/i);
   assert.match(layout, /lang="zh-CN"/);
