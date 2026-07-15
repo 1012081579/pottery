@@ -131,6 +131,33 @@ canvas:focus-visible {
   user-select: none;
 }
 
+.pottery-model {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pottery-model canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  opacity: 0;
+  pointer-events: auto;
+  touch-action: none;
+  transition: opacity 180ms ease;
+}
+
+.pottery-model canvas.is-ready {
+  opacity: 1;
+}
+
+.pottery-model canvas:active {
+  cursor: grabbing;
+}
+
 .control-panel {
   position: relative;
   z-index: 4;
@@ -166,6 +193,14 @@ canvas:focus-visible {
 .primary-button:active .action-word,
 .breath-button:active .action-word {
   transform: scale(0.96);
+}
+
+.primary-button:disabled {
+  cursor: default;
+}
+
+.primary-button:disabled .action-word {
+  opacity: 0.32;
 }
 
 .fire-controls {
@@ -218,23 +253,6 @@ canvas:focus-visible {
   letter-spacing: -0.02em;
 }
 
-.cooling-veil {
-  position: absolute;
-  inset: 0;
-  z-index: 6;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.72);
-}
-
-.cooling-veil span {
-  color: var(--white);
-  font-family: var(--font-rubik-spray-paint), "Arial Rounded MT Bold", fantasy;
-  font-size: 28px;
-  letter-spacing: 0.02em;
-  animation: breathe-text 1.1s ease-in-out infinite alternate;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -243,15 +261,6 @@ canvas:focus-visible {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
-}
-
-@keyframes breathe-text {
-  from {
-    opacity: 0.42;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 @media (max-height: 700px) {

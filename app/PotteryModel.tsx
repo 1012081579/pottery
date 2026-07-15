@@ -1,0 +1,411 @@
+"use client";
+
+import { useEffect, type RefObject } from "react";
+import * as THREE from "three";
+
+interface PotteryModelProps {
+  profile: number[];
+  brushLayer: HTMLCanvasElement | null;
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  sourceCanvasRef: RefObject<HTMLCanvasElement | null>;
+  onReady: () => void;
+  onUnavailable: () => void;
+}
+
+const TEXTURE_SIZE = 1024;
+const CANVAS_WIDTH = 360;
+const CANVAS_HEIGHT = 440;
+const POT_CENTER = 180;
+const POT_TOP = 58;
+const POT_BOTTOM = 344;
+const POT_VISUAL_SCALE = 1.32;
+const INITIAL_PROFILE_MAX = 111.614991651;
+const PROFILE_TO_WORLD = 1.22 / INITIAL_PROFILE_MAX;
+const WORLD_PER_CANVAS_PIXEL = PROFILE_TO_WORLD / POT_VISUAL_SCALE;
+const MAX_TILT = 0.28;
+const RIM_PRESENTATION_TILT = 0.12;
+const MODEL_HEIGHT = (POT_BOTTOM - POT_TOP) * WORLD_PER_CANVAS_PIXEL;
+const MODEL_Y_OFFSET =
+  (CANVAS_HEIGHT * 0.5 - (POT_TOP + POT_BOTTOM) * 0.5) *
+  WORLD_PER_CANVAS_PIXEL;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function radiusAtCanvasY(profile: number[], canvasY: number) {
+  const position =
+    clamp((canvasY - POT_TOP) / (POT_BOTTOM - POT_TOP), 0, 1) *
+    Math.max(1, profile.length - 1);
+  const lowerIndex = Math.min(Math.floor(position), profile.length - 1);
+  const upperIndex = Math.min(lowerIndex + 1, profile.length - 1);
+  const progress = position - lowerIndex;
+  return (
+    profile[lowerIndex] +
+    (profile[upperIndex] - profile[lowerIndex]) * progress
+  );
+}
+
+function createPotTexture(
+  profile: number[],
+  brushLayer: HTMLCanvasElement | null,
+) {
+  const textureCanvas = document.createElement("canvas");
+  textureCanvas.width = TEXTURE_SIZE;
+  textureCanvas.height = TEXTURE_SIZE;
+  const context = textureCanvas.getContext("2d");
+  if (!context) return null;
+
+  context.fillStyle = "#f7f7f2";
+  context.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+
+  const brushContext = brushLayer?.getContext("2d", {
+    willReadFrequently: true,
+  });
+  if (brushLayer && brushContext) {
+    const brushPixels = brushContext.getImageData(
+      0,
+      0,
+      brushLayer.width,
+      brushLayer.height,
+    );
+    const texturePixels = context.getImageData(
+      0,
+      0,
+      TEXTURE_SIZE,
+      TEXTURE_SIZE,
+    );
+    const sourceScaleX = brushLayer.width / CANVAS_WIDTH;
+    const sourceScaleY = brushLayer.height / CANVAS_HEIGHT;
+
+    for (let textureY = 0; textureY < TEXTURE_SIZE; textureY += 1) {
+      const verticalProgress = textureY / (TEXTURE_SIZE - 1);
+      const canvasY = POT_TOP + verticalProgress * (POT_BOTTOM - POT_TOP);
+      const radius = radiusAtCanvasY(profile, canvasY) * POT_VISUAL_SCALE;
+      const sourceY = clamp(
+        Math.round(canvasY * sourceScaleY),
+        0,
+        brushLayer.height - 1,
+      );
+
+      for (
+        let textureX = TEXTURE_SIZE / 4;
+        textureX <= (TEXTURE_SIZE * 3) / 4;
+        textureX += 1
+      ) {
+        const u = textureX / (TEXTURE_SIZE - 1);
+        const surfaceAngle = (u - 0.5) * Math.PI * 2;
+        const canvasX = POT_CENTER + Math.sin(surfaceAngle) * radius;
+        const sourceX = clamp(
+          Math.round(canvasX * sourceScaleX),
+          0,
+          brushLayer.width - 1,
+        );
+        const sourceIndex =
+          (sourceY * brushLayer.width + sourceX) * 4;
+        const alpha = brushPixels.data[sourceIndex + 3] / 255;
+        if (alpha <= 0) continue;
+
+        const textureIndex =
+          (textureY * TEXTURE_SIZE + textureX) * 4;
+        texturePixels.data[textureIndex] = Math.round(
+          brushPixels.data[sourceIndex] * alpha +
+            texturePixels.data[textureIndex] * (1 - alpha),
+        );
+        texturePixels.data[textureIndex + 1] = Math.round(
+          brushPixels.data[sourceIndex + 1] * alpha +
+            texturePixels.data[textureIndex + 1] * (1 - alpha),
+        );
+        texturePixels.data[textureIndex + 2] = Math.round(
+          brushPixels.data[sourceIndex + 2] * alpha +
+            texturePixels.data[textureIndex + 2] * (1 - alpha),
+        );
+      }
+    }
+
+    context.putImageData(texturePixels, 0, 0);
+  }
+
+  const texture = new THREE.CanvasTexture(textureCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+export function PotteryModel({
+  profile,
+  brushLayer,
+  canvasRef,
+  sourceCanvasRef,
+  onReady,
+  onUnavailable,
+}: PotteryModelProps) {
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = canvas?.parentElement;
+    if (!canvas || !container) return;
+
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: false,
+        preserveDrawingBuffer: true,
+      });
+    } catch {
+      onUnavailable();
+      return;
+    }
+
+    renderer.setClearColor(0x000000, 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+    camera.position.set(0, 0, 8);
+    camera.lookAt(0, 0, 0);
+
+    const group = new THREE.Group();
+    group.rotation.y = Math.PI;
+    group.position.y = MODEL_Y_OFFSET;
+    scene.add(group);
+
+    const points = profile
+      .map((radius, index) => {
+        const progress = index / Math.max(1, profile.length - 1);
+        return new THREE.Vector2(
+          Math.max(0.06, radius * PROFILE_TO_WORLD),
+          MODEL_HEIGHT * 0.5 - progress * MODEL_HEIGHT,
+        );
+      })
+      .reverse();
+
+    const geometry = new THREE.LatheGeometry(points, 96);
+    geometry.computeVertexNormals();
+
+    const texture = createPotTexture(profile, brushLayer);
+    if (texture) {
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
+    const gradientMap = new THREE.DataTexture(
+      new Uint8Array([58, 142, 236]),
+      3,
+      1,
+      THREE.RedFormat,
+    );
+    gradientMap.minFilter = THREE.NearestFilter;
+    gradientMap.magFilter = THREE.NearestFilter;
+    gradientMap.needsUpdate = true;
+
+    const potteryMaterial = new THREE.MeshToonMaterial({
+      color: 0xf9f9f4,
+      map: texture,
+      gradientMap,
+    });
+    const pot = new THREE.Mesh(geometry, potteryMaterial);
+    group.add(pot);
+
+    const outlineMaterial = new THREE.MeshBasicMaterial({
+      color: 0x34322f,
+      side: THREE.BackSide,
+    });
+    const outline = new THREE.Mesh(geometry, outlineMaterial);
+    outline.scale.set(1.018, 1.006, 1.018);
+    group.add(outline);
+
+    const unmarkedMaterial = new THREE.MeshToonMaterial({
+      color: 0xf9f9f4,
+      gradientMap,
+    });
+    const topRadius = Math.max(0.06, profile[0] * PROFILE_TO_WORLD);
+    const topY = MODEL_HEIGHT * 0.5;
+    const rimGeometry = new THREE.TorusGeometry(topRadius, 0.035, 12, 72);
+    const rim = new THREE.Mesh(rimGeometry, unmarkedMaterial);
+    rim.rotation.x = Math.PI / 2 - RIM_PRESENTATION_TILT;
+    rim.position.y = topY;
+    group.add(rim);
+
+    const mouthGeometry = new THREE.CircleGeometry(topRadius * 0.82, 72);
+    const mouthMaterial = new THREE.MeshBasicMaterial({ color: 0x030303 });
+    const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
+    mouth.rotation.x = -Math.PI / 2 + RIM_PRESENTATION_TILT;
+    mouth.position.y = topY - 0.018;
+    group.add(mouth);
+
+    const bottomRadius = Math.max(
+      0.06,
+      profile[profile.length - 1] * PROFILE_TO_WORLD,
+    );
+    const bottomGeometry = new THREE.CircleGeometry(bottomRadius, 72);
+    const bottom = new THREE.Mesh(bottomGeometry, unmarkedMaterial);
+    bottom.rotation.x = Math.PI / 2;
+    bottom.position.y = -MODEL_HEIGHT * 0.5 + 0.004;
+    group.add(bottom);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 0.62));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.28);
+    keyLight.position.set(-3.4, 4.2, 4.8);
+    scene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0xffd7a0, 0.38);
+    rimLight.position.set(3.5, 0.8, -2.4);
+    scene.add(rimLight);
+
+    let targetRotation = Math.PI;
+    let targetTilt = 0;
+    let dragging = false;
+    let activePointerId: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+    let frame = 0;
+    let lastFrameTime = performance.now();
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    const endDrag = (event: PointerEvent) => {
+      if (event.pointerId !== activePointerId) return;
+      dragging = false;
+      activePointerId = null;
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!event.isPrimary || event.button !== 0 || activePointerId !== null) {
+        return;
+      }
+      dragging = true;
+      activePointerId = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragging || event.pointerId !== activePointerId) return;
+      targetRotation += (event.clientX - lastX) * 0.012;
+      targetTilt = THREE.MathUtils.clamp(
+        targetTilt + (event.clientY - lastY) * 0.004,
+        -0.22,
+        MAX_TILT,
+      );
+      lastX = event.clientX;
+      lastY = event.clientY;
+    };
+    const handlePointerUp = (event: PointerEvent) => {
+      if (event.pointerId !== activePointerId) return;
+      dragging = false;
+      activePointerId = null;
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        targetRotation += event.key === "ArrowLeft" ? -0.22 : 0.22;
+      }
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        targetTilt = THREE.MathUtils.clamp(
+          targetTilt + (event.key === "ArrowUp" ? 0.08 : -0.08),
+          -0.22,
+          MAX_TILT,
+        );
+      }
+    };
+
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointercancel", handlePointerUp);
+    canvas.addEventListener("lostpointercapture", endDrag);
+    canvas.addEventListener("keydown", handleKeyDown);
+
+    const resize = () => {
+      const width = Math.max(1, container.clientWidth);
+      const height = Math.max(1, container.clientHeight);
+      renderer.setSize(width, height, false);
+
+      const sourceBounds = sourceCanvasRef.current?.getBoundingClientRect();
+      const canvasScale = sourceBounds
+        ? Math.max(
+            0.01,
+            Math.min(
+              sourceBounds.width / CANVAS_WIDTH,
+              sourceBounds.height / CANVAS_HEIGHT,
+            ),
+          )
+        : Math.max(
+            0.01,
+            Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT),
+          );
+      const worldPerScreenPixel = WORLD_PER_CANVAS_PIXEL / canvasScale;
+      camera.left = (-width * worldPerScreenPixel) / 2;
+      camera.right = (width * worldPerScreenPixel) / 2;
+      camera.top = (height * worldPerScreenPixel) / 2;
+      camera.bottom = (-height * worldPerScreenPixel) / 2;
+      camera.updateProjectionMatrix();
+    };
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(container);
+    if (sourceCanvasRef.current) {
+      resizeObserver.observe(sourceCanvasRef.current);
+    }
+    resize();
+
+    const render = (time: number) => {
+      const delta = Math.min((time - lastFrameTime) / 1000, 0.05);
+      lastFrameTime = time;
+      if (!dragging && !reduceMotion) targetRotation += delta * 0.09;
+      group.rotation.y += (targetRotation - group.rotation.y) * 0.11;
+      group.rotation.x += (targetTilt - group.rotation.x) * 0.11;
+      renderer.render(scene, camera);
+      frame = requestAnimationFrame(render);
+    };
+
+    renderer.render(scene, camera);
+    canvas.classList.add("is-ready");
+    canvas.setAttribute("aria-busy", "false");
+    onReady();
+    frame = requestAnimationFrame(render);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      canvas.classList.remove("is-ready");
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointercancel", handlePointerUp);
+      canvas.removeEventListener("lostpointercapture", endDrag);
+      canvas.removeEventListener("keydown", handleKeyDown);
+      geometry.dispose();
+      rimGeometry.dispose();
+      mouthGeometry.dispose();
+      bottomGeometry.dispose();
+      potteryMaterial.dispose();
+      unmarkedMaterial.dispose();
+      outlineMaterial.dispose();
+      mouthMaterial.dispose();
+      texture?.dispose();
+      gradientMap.dispose();
+      renderer.dispose();
+    };
+  }, [brushLayer, canvasRef, onReady, onUnavailable, profile, sourceCanvasRef]);
+
+  return (
+    <div className="pottery-model">
+      <canvas
+        ref={canvasRef}
+        role="application"
+        aria-label="可用手指左右拖动旋转的三维陶器成品"
+        aria-busy="true"
+        tabIndex={0}
+      />
+    </div>
+  );
+}

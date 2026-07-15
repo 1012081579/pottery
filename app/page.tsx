@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -9,7 +11,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-type Stage = "shape" | "fire" | "reveal";
+const PotteryModel = lazy(async () => {
+  const componentModule = await import("./PotteryModel");
+  return { default: componentModule.PotteryModel };
+});
+
+type Stage = "shape" | "write" | "fire" | "reveal";
+type ModelStatus = "loading" | "ready" | "unavailable";
 type MicStatus =
   | "idle"
   | "requesting"
@@ -20,7 +28,7 @@ type MicStatus =
 
 type PointerState = {
   down: boolean;
-  mode: "shape" | null;
+  mode: "shape" | "write" | null;
   x: number;
   y: number;
 };
@@ -32,6 +40,31 @@ type AudioState = {
   frame: number;
 };
 
+type BrushStamp = {
+  x: number;
+  y: number;
+  radius: number;
+  angle: number;
+};
+
+type BrushStroke = {
+  seed: number;
+  stampCount: number;
+  lastAngle: number;
+  lastStamp: BrushStamp | null;
+};
+
+type BrushPoint = {
+  x: number;
+  y: number;
+  pressure: number;
+};
+
+type FinishedPiece = {
+  profile: number[];
+  brushLayer: HTMLCanvasElement | null;
+};
+
 const CANVAS_WIDTH = 360;
 const CANVAS_HEIGHT = 440;
 const POT_CENTER = 180;
@@ -39,6 +72,7 @@ const POT_TOP = 58;
 const POT_BOTTOM = 344;
 const PROFILE_COUNT = 32;
 const POT_VISUAL_SCALE = 1.32;
+const BRUSH_LAYER_SCALE = 2;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -93,13 +127,87 @@ function buildPotPath(profile: number[]) {
   return path;
 }
 
-function drawPot(ctx: CanvasRenderingContext2D, profile: number[]) {
+function paintBrushStamp(
+  ctx: CanvasRenderingContext2D,
+  stamp: BrushStamp,
+  seed: number,
+  index: number,
+) {
+  const edge = edgeNoise(index, seed);
+  const radius = stamp.radius;
+  const jitterX = edgeNoise(index + 13, seed) * 0.7;
+  const jitterY = edgeNoise(index + 29, seed) * 0.7;
+
+  ctx.beginPath();
+  ctx.ellipse(
+    stamp.x + jitterX,
+    stamp.y + jitterY,
+    radius * (0.82 + edge * 0.1),
+    radius * (0.58 - edge * 0.06),
+    stamp.angle,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fillStyle = "rgba(3, 3, 3, .96)";
+  ctx.fill();
+
+  if (index % 2 === 0 && radius > 2.2) {
+    const perpendicularX = -Math.sin(stamp.angle);
+    const perpendicularY = Math.cos(stamp.angle);
+    for (const side of [-1, 1]) {
+      const bristleNoise = edgeNoise(index + side * 7, seed + 31);
+      const offset = side * radius * (0.58 + bristleNoise * 0.16);
+      ctx.beginPath();
+      ctx.ellipse(
+        stamp.x + perpendicularX * offset,
+        stamp.y + perpendicularY * offset,
+        radius * (0.38 + Math.abs(bristleNoise) * 0.15),
+        Math.max(0.55, radius * 0.1),
+        stamp.angle,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fillStyle = "rgba(3, 3, 3, .62)";
+      ctx.fill();
+    }
+  }
+}
+
+function drawBrushLayer(
+  ctx: CanvasRenderingContext2D,
+  potPath: Path2D,
+  brushLayer: HTMLCanvasElement | null,
+) {
+  if (!brushLayer) return;
+  ctx.save();
+  ctx.clip(potPath);
+  ctx.drawImage(
+    brushLayer,
+    0,
+    0,
+    brushLayer.width,
+    brushLayer.height,
+    0,
+    0,
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
+  );
+  ctx.restore();
+}
+
+function drawPot(
+  ctx: CanvasRenderingContext2D,
+  profile: number[],
+  brushLayer: HTMLCanvasElement | null,
+) {
   const path = buildPotPath(profile);
   const paper = "#f8f8f4";
   const rimRadius = profile[0] * POT_VISUAL_SCALE;
   const rimHeight = clamp(rimRadius * 0.18, 3, 10.5);
   ctx.fillStyle = paper;
   ctx.fill(path);
+
+  drawBrushLayer(ctx, path, brushLayer);
 
   ctx.strokeStyle = "rgba(255, 255, 255, .94)";
   ctx.lineWidth = 2.8;
@@ -186,6 +294,7 @@ function drawKiln(
   ctx: CanvasRenderingContext2D,
   time: number,
   profile: number[],
+  brushLayer: HTMLCanvasElement | null,
   power: number,
 ) {
   const glow = ctx.createRadialGradient(
@@ -216,7 +325,7 @@ function drawKiln(
   ctx.stroke();
 
   drawFlames(ctx, time, power, false);
-  drawPot(ctx, profile);
+  drawPot(ctx, profile, brushLayer);
   drawFlames(ctx, time + 190, power, true);
 }
 
@@ -224,11 +333,12 @@ function drawStudio(
   ctx: CanvasRenderingContext2D,
   time: number,
   profile: number[],
+  brushLayer: HTMLCanvasElement | null,
   pointer: PointerState,
 ) {
-  drawPot(ctx, profile);
+  drawPot(ctx, profile, brushLayer);
 
-  if (pointer.down) {
+  if (pointer.down && pointer.mode === "shape") {
     const radius = 14;
     const pulse = 2 + Math.sin(time * 0.01) * 2;
     ctx.beginPath();
@@ -243,8 +353,12 @@ function drawStudio(
   }
 }
 
-function drawReveal(ctx: CanvasRenderingContext2D, profile: number[]) {
-  drawPot(ctx, profile);
+function drawReveal(
+  ctx: CanvasRenderingContext2D,
+  profile: number[],
+  brushLayer: HTMLCanvasElement | null,
+) {
+  drawPot(ctx, profile, brushLayer);
 }
 
 export default function Home() {
@@ -253,9 +367,11 @@ export default function Home() {
   const [micStatus, setMicStatus] = useState<MicStatus>("idle");
   const [fireProgress, setFireProgress] = useState(0);
   const [manualActive, setManualActive] = useState(false);
-  const [cooling, setCooling] = useState(false);
+  const [finishedPiece, setFinishedPiece] = useState<FinishedPiece | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatus>("loading");
 
   const stageRef = useRef(stage);
+  const modelCanvasRef = useRef<HTMLCanvasElement>(null);
   const profileRef = useRef<number[]>([...INITIAL_PROFILE]);
   const pointerRef = useRef<PointerState>({
     down: false,
@@ -267,13 +383,16 @@ export default function Home() {
     lastX: number;
     side: 1 | -1;
   } | null>(null);
+  const brushLayerRef = useRef<HTMLCanvasElement | null>(null);
+  const activeBrushStrokeRef = useRef<BrushStroke | null>(null);
+  const lastBrushPointRef = useRef<BrushPoint | null>(null);
+  const brushSeedRef = useRef(0);
   const audioRef = useRef<AudioState | null>(null);
   const micRequestIdRef = useRef(0);
   const micPowerRef = useRef(0);
   const manualPowerRef = useRef(0);
   const firePowerRef = useRef(0);
   const fireProgressRef = useRef(0);
-  const coolingRef = useRef(false);
 
   const stopMicrophone = useCallback(() => {
     micRequestIdRef.current += 1;
@@ -322,35 +441,42 @@ export default function Home() {
       context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       context.fillStyle = "#000000";
       context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      if (stageRef.current === "fire") {
+      if (stage === "fire") {
         drawKiln(
           context,
           time,
           profileRef.current,
+          brushLayerRef.current,
           firePowerRef.current,
         );
-      } else if (stageRef.current === "reveal") {
-        drawReveal(context, profileRef.current);
+      } else if (stage === "reveal") {
+        drawReveal(
+          context,
+          profileRef.current,
+          brushLayerRef.current,
+        );
       } else {
         drawStudio(
           context,
           time,
           profileRef.current,
+          brushLayerRef.current,
           pointerRef.current,
         );
       }
-      animationFrame = requestAnimationFrame(paint);
+      if (stage !== "reveal") {
+        animationFrame = requestAnimationFrame(paint);
+      }
     };
-    animationFrame = requestAnimationFrame(paint);
+    paint(performance.now());
     return () => cancelAnimationFrame(animationFrame);
-  }, []);
+  }, [stage]);
 
   useEffect(() => {
     if (stage !== "fire") return;
     let frame = 0;
     let lastTime = performance.now();
     let lastUiUpdate = 0;
-    let revealTimer: ReturnType<typeof setTimeout> | null = null;
 
     const advanceFire = (time: number) => {
       const delta = Math.min((time - lastTime) / 1000, 0.06);
@@ -359,7 +485,7 @@ export default function Home() {
       const smoothing = target > firePowerRef.current ? 0.28 : 0.075;
       firePowerRef.current += (target - firePowerRef.current) * smoothing;
 
-      if (!coolingRef.current && firePowerRef.current > 0.08) {
+      if (firePowerRef.current > 0.08) {
         const speed = (0.16 + firePowerRef.current * 0.84) / 7.2;
         fireProgressRef.current = Math.min(
           1,
@@ -372,23 +498,25 @@ export default function Home() {
         lastUiUpdate = time;
       }
 
-      if (fireProgressRef.current >= 1 && !coolingRef.current) {
-        coolingRef.current = true;
-        setCooling(true);
+      if (fireProgressRef.current >= 1) {
         setMicStatus("idle");
         manualPowerRef.current = 0;
         setManualActive(false);
         stopMicrophone();
-        revealTimer = setTimeout(() => setStage("reveal"), 1450);
+        setModelStatus("loading");
+        setFinishedPiece({
+          profile: [...profileRef.current],
+          brushLayer: brushLayerRef.current,
+        });
+        stageRef.current = "reveal";
+        setStage("reveal");
+        return;
       }
 
       frame = requestAnimationFrame(advanceFire);
     };
     frame = requestAnimationFrame(advanceFire);
-    return () => {
-      cancelAnimationFrame(frame);
-      if (revealTimer) clearTimeout(revealTimer);
-    };
+    return () => cancelAnimationFrame(frame);
   }, [stage, stopMicrophone]);
 
   const startMicrophone = async () => {
@@ -509,6 +637,19 @@ export default function Home() {
     );
   };
 
+  const isOnPotSurface = (x: number, y: number) => {
+    if (y < POT_TOP + 8 || y > POT_BOTTOM - 2) return false;
+    const index = clamp(
+      Math.round(((y - POT_TOP) / (POT_BOTTOM - POT_TOP)) * (PROFILE_COUNT - 1)),
+      0,
+      PROFILE_COUNT - 1,
+    );
+    return (
+      Math.abs(x - POT_CENTER) <=
+      Math.max(4, profileRef.current[index] * POT_VISUAL_SCALE - 4)
+    );
+  };
+
   const shapeAtPoint = (x: number, y: number) => {
     const gesture = gestureRef.current;
     if (!gesture) return;
@@ -536,23 +677,165 @@ export default function Home() {
     profileRef.current = smoothed;
   };
 
+  const ensureBrushLayerContext = () => {
+    let layer = brushLayerRef.current;
+    if (!layer) {
+      layer = document.createElement("canvas");
+      layer.width = CANVAS_WIDTH * BRUSH_LAYER_SCALE;
+      layer.height = CANVAS_HEIGHT * BRUSH_LAYER_SCALE;
+      brushLayerRef.current = layer;
+    }
+    return layer.getContext("2d");
+  };
+
+  const appendBrushSegment = (from: BrushPoint, to: BrushPoint) => {
+    const stroke = activeBrushStrokeRef.current;
+    const context = ensureBrushLayerContext();
+    if (!stroke || !context) return;
+    const deltaX = to.x - from.x;
+    const deltaY = to.y - from.y;
+    const distance = Math.hypot(deltaX, deltaY);
+    const steps = Math.max(1, Math.min(64, Math.ceil(distance / 2.1)));
+    const pressure = clamp(to.pressure || 0.5, 0.18, 1);
+    const baseRadius = clamp(
+      7.4 + pressure * 5.2 - Math.min(distance, 24) * 0.08,
+      5.2,
+      12.6,
+    );
+    const angle = distance > 0.2 ? Math.atan2(deltaY, deltaX) : stroke.lastAngle;
+
+    context.save();
+    context.setTransform(
+      BRUSH_LAYER_SCALE,
+      0,
+      0,
+      BRUSH_LAYER_SCALE,
+      0,
+      0,
+    );
+    context.clip(buildPotPath(profileRef.current));
+
+    for (let step = 1; step <= steps; step += 1) {
+      const progress = step / steps;
+      const stampIndex = stroke.stampCount;
+      const startTaper = Math.min(1, (stampIndex + 1) / 5);
+      const stamp: BrushStamp = {
+        x: from.x + deltaX * progress,
+        y: from.y + deltaY * progress,
+        radius:
+          baseRadius *
+          (0.32 + startTaper * 0.68) *
+          (0.9 + edgeNoise(stampIndex, stroke.seed + 47) * 0.12),
+        angle:
+          angle + edgeNoise(stampIndex, stroke.seed + 73) * 0.045,
+      };
+      paintBrushStamp(context, stamp, stroke.seed, stampIndex);
+      stroke.stampCount += 1;
+      stroke.lastAngle = angle;
+      stroke.lastStamp = stamp;
+    }
+    context.restore();
+  };
+
+  const startBrushStroke = (point: BrushPoint) => {
+    brushSeedRef.current += 1;
+    const stroke: BrushStroke = {
+      seed: brushSeedRef.current,
+      stampCount: 0,
+      lastAngle: 0,
+      lastStamp: null,
+    };
+    activeBrushStrokeRef.current = stroke;
+    lastBrushPointRef.current = point;
+    appendBrushSegment(point, point);
+  };
+
+  const finishBrushStroke = () => {
+    const stroke = activeBrushStrokeRef.current;
+    const lastStamp = stroke?.lastStamp;
+    if (!stroke || !lastStamp) {
+      activeBrushStrokeRef.current = null;
+      lastBrushPointRef.current = null;
+      return;
+    }
+    const context = ensureBrushLayerContext();
+    if (context) {
+      context.save();
+      context.setTransform(
+        BRUSH_LAYER_SCALE,
+        0,
+        0,
+        BRUSH_LAYER_SCALE,
+        0,
+        0,
+      );
+      context.clip(buildPotPath(profileRef.current));
+      [0.68, 0.46, 0.27, 0.12].forEach((scale, index) => {
+        const distance = (index + 1) * 1.35;
+        const stamp: BrushStamp = {
+          x: lastStamp.x + Math.cos(stroke.lastAngle) * distance,
+          y: lastStamp.y + Math.sin(stroke.lastAngle) * distance,
+          radius: lastStamp.radius * scale,
+          angle: lastStamp.angle,
+        };
+        paintBrushStamp(
+          context,
+          stamp,
+          stroke.seed,
+          stroke.stampCount + index,
+        );
+      });
+      context.restore();
+    }
+    activeBrushStrokeRef.current = null;
+    lastBrushPointRef.current = null;
+  };
+
+  const writeAtPoint = (point: BrushPoint) => {
+    if (!isOnPotSurface(point.x, point.y)) {
+      finishBrushStroke();
+      return;
+    }
+
+    const previous = lastBrushPointRef.current;
+    if (!activeBrushStrokeRef.current || !previous) {
+      startBrushStroke(point);
+      return;
+    }
+
+    appendBrushSegment(previous, point);
+    lastBrushPointRef.current = point;
+  };
+
   const finishCanvasGesture = () => {
     gestureRef.current = null;
+    finishBrushStroke();
     pointerRef.current = { ...pointerRef.current, down: false, mode: null };
   };
 
   const handleCanvasPointerDown = (
     event: ReactPointerEvent<HTMLCanvasElement>,
   ) => {
-    if (stage !== "shape") return;
     const point = canvasPoint(event);
-    if (!isInsidePot(point.x, point.y)) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    pointerRef.current = { down: true, mode: "shape", ...point };
-    gestureRef.current = {
-      lastX: point.x,
-      side: point.x >= POT_CENTER ? 1 : -1,
-    };
+    if (stage === "shape") {
+      if (!isInsidePot(point.x, point.y)) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      pointerRef.current = { down: true, mode: "shape", ...point };
+      gestureRef.current = {
+        lastX: point.x,
+        side: point.x >= POT_CENTER ? 1 : -1,
+      };
+      return;
+    }
+
+    if (stage === "write" && isOnPotSurface(point.x, point.y)) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      pointerRef.current = { down: true, mode: "write", ...point };
+      startBrushStroke({
+        ...point,
+        pressure: event.pressure || 0.5,
+      });
+    }
   };
 
   const handleCanvasPointerMove = (
@@ -562,6 +845,12 @@ export default function Home() {
     const point = canvasPoint(event);
     pointerRef.current = { ...pointerRef.current, ...point };
     if (pointerRef.current.mode === "shape") shapeAtPoint(point.x, point.y);
+    if (pointerRef.current.mode === "write") {
+      writeAtPoint({
+        ...point,
+        pressure: event.pressure || 0.5,
+      });
+    }
   };
 
   const handleCanvasPointerUp = (
@@ -573,14 +862,20 @@ export default function Home() {
     }
   };
 
+  const enterWrite = () => {
+    finishCanvasGesture();
+    stageRef.current = "write";
+    setStage("write");
+  };
+
   const enterFire = () => {
+    finishCanvasGesture();
     firePowerRef.current = 0;
     fireProgressRef.current = 0;
     micPowerRef.current = 0;
     manualPowerRef.current = 0;
-    coolingRef.current = false;
     setFireProgress(0);
-    setCooling(false);
+    setModelStatus("loading");
     setMicStatus("idle");
     stageRef.current = "fire";
     setStage("fire");
@@ -588,7 +883,6 @@ export default function Home() {
   };
 
   const beginManualFire = () => {
-    if (cooling) return;
     manualPowerRef.current = 1;
     setManualActive(true);
   };
@@ -620,17 +914,34 @@ export default function Home() {
     firePowerRef.current = 0;
     micPowerRef.current = 0;
     manualPowerRef.current = 0;
-    coolingRef.current = false;
+    brushLayerRef.current = null;
+    activeBrushStrokeRef.current = null;
+    lastBrushPointRef.current = null;
+    brushSeedRef.current = 0;
     setMicStatus("idle");
     setFireProgress(0);
     setManualActive(false);
-    setCooling(false);
+    setFinishedPiece(null);
+    setModelStatus("loading");
     stageRef.current = "shape";
     setStage("shape");
   };
 
+  const handleModelReady = useCallback(() => {
+    setModelStatus("ready");
+  }, []);
+
+  const handleModelUnavailable = useCallback(() => {
+    setModelStatus("unavailable");
+  }, []);
+
   const savePiece = () => {
-    const canvas = canvasRef.current;
+    const canvas =
+      modelStatus === "ready"
+        ? modelCanvasRef.current
+        : modelStatus === "unavailable"
+          ? canvasRef.current
+          : null;
     if (!canvas) return;
     const link = document.createElement("a");
     link.download = "泥火间-手塑陶器.png";
@@ -642,6 +953,8 @@ export default function Home() {
   const canvasLabel =
     stage === "shape"
       ? "可触摸塑形的陶坯。沿器身左右拖动改变轮廓。"
+      : stage === "write"
+        ? "可触摸题字的陶器。用手指在器身书写黑色毛笔字。"
       : stage === "fire"
         ? "窑火与陶器，火焰会随吹气强度变化。"
         : "已经烧制完成的陶艺作品。";
@@ -656,10 +969,10 @@ export default function Home() {
   const stageAnnouncement =
     stage === "shape"
       ? "塑形。左右拖动陶器轮廓。"
+      : stage === "write"
+        ? "题字。用手指在陶器表面书写。"
       : stage === "fire"
-        ? cooling
-          ? "烧制完成，陶器正在冷却。"
-          : `烧制。${microphoneAnnouncement}`
+        ? `烧制。${microphoneAnnouncement}`
         : "陶器已经完成。";
 
   return (
@@ -670,21 +983,31 @@ export default function Home() {
         </header>
 
         <div className="stage-body">
-          <div className={`canvas-wrap ${cooling ? "is-cooling" : ""}`}>
+          <div className="canvas-wrap">
             <canvas
               ref={canvasRef}
               className="pottery-canvas"
               aria-label={canvasLabel}
+              aria-hidden={stage === "reveal" ? true : undefined}
               role="img"
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handleCanvasPointerMove}
               onPointerUp={handleCanvasPointerUp}
               onPointerCancel={handleCanvasPointerUp}
             />
-            {cooling && (
-              <div className="cooling-veil" role="status">
-                <span>Cooling</span>
-              </div>
+            {stage === "reveal" &&
+              finishedPiece &&
+              modelStatus !== "unavailable" && (
+              <Suspense fallback={null}>
+                <PotteryModel
+                  profile={finishedPiece.profile}
+                  brushLayer={finishedPiece.brushLayer}
+                  canvasRef={modelCanvasRef}
+                  sourceCanvasRef={canvasRef}
+                  onReady={handleModelReady}
+                  onUnavailable={handleModelUnavailable}
+                />
+              </Suspense>
             )}
           </div>
 
@@ -693,52 +1016,68 @@ export default function Home() {
               <button
                 type="button"
                 className="primary-button"
-                onClick={enterFire}
-                aria-label="完成塑形，入窑烧制"
+                onClick={enterWrite}
+                aria-label="完成塑形，开始题字"
               >
                 <span className="action-word" aria-hidden="true">Finish</span>
               </button>
             </div>
           )}
 
+          {stage === "write" && (
+            <div className="control-panel">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={enterFire}
+                aria-label="完成题字，入窑烧制"
+              >
+                <span className="action-word" aria-hidden="true">Fire</span>
+              </button>
+            </div>
+          )}
+
           {stage === "fire" && (
             <div className="control-panel fire-controls">
-              {!cooling && (
-                <>
-                  <div
-                    className="fire-meter"
-                    role="progressbar"
-                    aria-label="烧制进度"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={progressPercent}
-                  >
-                    <span style={{ width: `${progressPercent}%` }} />
-                  </div>
-                  <button
-                    type="button"
-                    className={`breath-button ${manualActive ? "is-active" : ""}`}
-                    onPointerDown={(event) => {
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      beginManualFire();
-                    }}
-                    onPointerUp={endManualFire}
-                    onPointerCancel={endManualFire}
-                    onLostPointerCapture={endManualFire}
-                    onKeyDown={handleBreathKeyDown}
-                    onKeyUp={handleBreathKeyUp}
-                    aria-label="吹气或按住按钮烧制陶器"
-                  >
-                    <span className="action-word" aria-hidden="true">Blow</span>
-                  </button>
-                </>
-              )}
+              <div
+                className="fire-meter"
+                role="progressbar"
+                aria-label="烧制进度"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progressPercent}
+              >
+                <span style={{ width: `${progressPercent}%` }} />
+              </div>
+              <button
+                type="button"
+                className={`breath-button ${manualActive ? "is-active" : ""}`}
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  beginManualFire();
+                }}
+                onPointerUp={endManualFire}
+                onPointerCancel={endManualFire}
+                onLostPointerCapture={endManualFire}
+                onKeyDown={handleBreathKeyDown}
+                onKeyUp={handleBreathKeyUp}
+                aria-label="吹气或按住按钮烧制陶器"
+              >
+                <span className="action-word" aria-hidden="true">Blow</span>
+              </button>
             </div>
           )}
 
           {stage === "reveal" && (
             <div className="control-panel reveal-controls">
-              <button type="button" className="primary-button" onClick={savePiece} aria-label="保存成品图片">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={savePiece}
+                disabled={modelStatus === "loading"}
+                aria-busy={modelStatus === "loading"}
+                aria-label="保存成品图片"
+              >
                 <span className="action-word" aria-hidden="true">Save</span>
               </button>
               <button type="button" className="quiet-button" onClick={restart}>
