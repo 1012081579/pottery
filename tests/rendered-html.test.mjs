@@ -69,7 +69,8 @@ test("ships touch shaping, microphone, and manual-fire interactions without a gl
   assert.doesNotMatch(page, /className="canvas-hint"|className="fire-hint"/);
   assert.doesNotMatch(css, /\.canvas-hint|\.fire-hint/);
   assert.match(page, /className="fire-meter"[\s\S]*?role="progressbar"/);
-  assert.match(css, /\.fire-meter\s*\{[^}]*height:\s*1px;/s);
+  assert.match(css, /\.fire-meter\s*\{[^}]*width:\s*min\(48vw, 190px\);/s);
+  assert.match(css, /\.fire-meter\s*\{[^}]*height:\s*7px;/s);
   assert.match(page, />Save<\/span>/);
   assert.match(page, />\s*Again\s*<\/button>/);
   assert.doesNotMatch(page, /for\s*\(let y = POT_TOP \+ 12; y < POT_BOTTOM; y \+= 11\)/);

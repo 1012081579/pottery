@@ -174,17 +174,22 @@ canvas:focus-visible {
 }
 
 .fire-meter {
-  width: 58px;
-  height: 1px;
+  width: min(48vw, 190px);
+  height: 7px;
   overflow: hidden;
-  background: var(--faint);
+  padding: 1px;
+  border: 1px solid rgba(250, 250, 247, 0.24);
+  border-radius: 999px;
+  background: rgba(250, 250, 247, 0.07);
 }
 
 .fire-meter > span {
   display: block;
   height: 100%;
-  background: var(--white);
-  transition: width 160ms ease;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #fff8e8 0%, #ffb027 54%, #ff4a16 100%);
+  box-shadow: 0 0 12px rgba(255, 92, 22, 0.72);
+  transition: width 120ms ease-out;
 }
 
 .breath-button {
