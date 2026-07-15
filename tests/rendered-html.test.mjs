@@ -120,6 +120,11 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   assert.doesNotMatch(paintSource, /stageRef\.current/);
   assert.match(page, /paint\(performance\.now\(\)\);[\s\S]*?\}, \[stage\]\);/);
   assert.match(page, /function drawKiln\([\s\S]*?drawPot\(ctx, profile, brushLayer\);/);
+  const drawKilnSource = page.slice(
+    page.indexOf("function drawKiln"),
+    page.indexOf("function drawStudio"),
+  );
+  assert.doesNotMatch(drawKilnSource, /strokeStyle|lineWidth|ctx\.stroke\(\)/);
   assert.match(page, /function drawReveal\([\s\S]*?drawPot\(ctx, profile, brushLayer\);/);
   assert.doesNotMatch(page, /brushStrokesRef|slice\(-23\)|\.splice\(/);
   assert.equal(page.match(/brushLayerRef\.current = null;/g)?.length, 1);

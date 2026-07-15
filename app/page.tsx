@@ -320,9 +320,6 @@ function drawKiln(
   ctx.closePath();
   ctx.fillStyle = "#050505";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 255, 255, .52)";
-  ctx.lineWidth = 2.4;
-  ctx.stroke();
 
   drawFlames(ctx, time, power, false);
   drawPot(ctx, profile, brushLayer);
