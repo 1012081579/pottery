@@ -18,6 +18,12 @@ const PotteryModel = lazy(async () => {
 
 type Stage = "shape" | "write" | "fire" | "reveal";
 type ModelStatus = "loading" | "ready" | "unavailable";
+const STAGE_TITLES: Record<Stage, string> = {
+  shape: "Shape",
+  write: "Write",
+  fire: "Fire",
+  reveal: "Done",
+};
 type MicStatus =
   | "idle"
   | "requesting"
@@ -976,7 +982,7 @@ export default function Home() {
     <main className={`experience stage-${stage}`}>
       <section className="studio-shell" aria-label="泥火间陶艺工作室">
         <header className="topbar">
-          <h1 className="poster-title">Pottery</h1>
+          <h1 className="poster-title">{STAGE_TITLES[stage]}</h1>
         </header>
 
         <div className="stage-body">

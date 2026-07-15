@@ -31,7 +31,7 @@ test("server-renders the pottery studio shell and metadata", async () => {
   const html = await response.text();
   assert.match(html, /<html lang="zh-CN"/i);
   assert.match(html, /<title>泥火间 · 指尖陶艺模拟器<\/title>/i);
-  assert.match(html, /Pottery/);
+  assert.match(html, /Shape/);
   assert.match(html, /Finish/);
   assert.doesNotMatch(html, /STEP|制作进度|窑温|器物编号/i);
   assert.doesNotMatch(html, /上釉|釉色|glaze/i);
@@ -73,6 +73,14 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   assert.match(page, /onPointerMove=\{handleCanvasPointerMove\}/);
   assert.doesNotMatch(page, /className="stage-body"\s+key=\{stage\}/);
   assert.match(page, /type Stage = "shape" \| "write" \| "fire" \| "reveal"/);
+  assert.match(
+    page,
+    /const STAGE_TITLES: Record<Stage, string> = \{[\s\S]*?shape: "Shape",[\s\S]*?write: "Write",[\s\S]*?fire: "Fire",[\s\S]*?reveal: "Done",[\s\S]*?\};/,
+  );
+  assert.match(
+    page,
+    /<h1 className="poster-title">\{STAGE_TITLES\[stage\]\}<\/h1>/,
+  );
   assert.match(
     page,
     /const enterWrite = \(\) => \{[\s\S]*?setStage\("write"\);[\s\S]*?\n  \};/,
