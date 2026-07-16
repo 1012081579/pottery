@@ -346,6 +346,11 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   assert.doesNotMatch(`${page}\n${model}\n${layout}\n${css}`, /glaze/i);
   assert.match(layout, /lang="en"/);
   assert.match(css, /touch-action:\s*none/);
+  assert.match(css, /button\s*\{[^}]*touch-action:\s*manipulation;/s);
+  assert.match(
+    css,
+    /\.experience,\s*\.experience \*\s*\{[^}]*-webkit-touch-callout:\s*none;[^}]*-webkit-user-drag:\s*none;[^}]*-webkit-user-select:\s*none;[^}]*user-select:\s*none;/s,
+  );
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(packageJson, /"three"\s*:/);
