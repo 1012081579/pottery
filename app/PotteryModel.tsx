@@ -501,7 +501,7 @@ export function PotteryModel({
       <canvas
         ref={canvasRef}
         role="application"
-        aria-label="可用手指左右拖动旋转的三维陶器成品"
+        aria-label="Finished pottery in 3D. Drag or use the arrow keys to rotate."
         aria-busy="true"
         tabIndex={0}
       />

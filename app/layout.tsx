@@ -25,13 +25,13 @@ export async function generateMetadata(): Promise<Metadata> {
   const forwardedProtocol = requestHeaders.get("x-forwarded-proto");
   const protocol = forwardedProtocol ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "泥火间 · 指尖陶艺模拟器";
-  const description = "用手指塑形，再用真实吹气唤醒窑火，完成一件独一无二的数字陶器。";
+  const title = "Clay & Fire · Digital Pottery Studio";
+  const description = "Shape clay by touch, add your mark, then breathe life into the kiln.";
 
   return {
     title,
     description,
-    applicationName: "泥火间",
+    applicationName: "Clay & Fire",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
@@ -40,13 +40,13 @@ export async function generateMetadata(): Promise<Metadata> {
       title,
       description,
       type: "website",
-      locale: "zh_CN",
+      locale: "en_US",
       images: [
         {
           url: `${origin}/og.png`,
           width: 1536,
           height: 1024,
-          alt: "泥火间数字陶艺工作室",
+          alt: "Clay & Fire digital pottery studio",
         },
       ],
     },
@@ -66,7 +66,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="zh-CN"
+      lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${rubikSprayPaint.variable}`}
     >
       <body className="antialiased">{children}</body>

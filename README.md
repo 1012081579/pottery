@@ -1,31 +1,32 @@
-# 泥火间
+# Clay & Fire
 
-一个面向手机端的沉浸式数字陶艺模拟器。使用手指直接改变陶坯轮廓，分段涂抹或整器浸釉，再通过麦克风吹气控制窑火强度，完成一件独一无二的作品。
+A mobile-first, immersive digital pottery simulator. Shape the clay directly with touch, add expressive black brush marks, then blow into the microphone to intensify the kiln and finish a unique piece.
 
-## 体验流程
+## Experience
 
-1. **塑形**：在陶坯边缘左右推拉，局部改变口沿、肩部和器腹；也可使用坯型预设、撤销与重置。
-2. **上釉**：选择雨过青、月白、霁蓝或柿红，在器身滑动混釉；支持整器浸釉。
-3. **烧制**：开启麦克风后对设备吹气，风越强火越旺；权限不可用时可按住“鼓风”完成烧制。
-4. **开窑**：查看烧成作品并保存成 PNG。
+1. **Shape**: Drag the vessel's sides to sculpt its rim, shoulders, and body.
+2. **Write**: Draw directly on the clay with your finger to create black, ink-like brush marks.
+3. **Fire**: Blow into the microphone to raise the flames. If microphone access is unavailable, press and hold the Blow button.
+4. **Reveal**: Rotate the finished 3D piece and save it as a PNG.
 
-麦克风数据只在浏览器本机用于计算音量，不录音、不上传。麦克风能力需要在 `localhost` 或 HTTPS 环境中使用。
+Microphone input is used only in the browser to measure volume. Audio is never recorded or uploaded. Microphone access requires `localhost` or HTTPS.
 
-## 本地运行
+## Local development
 
-需要 Node.js `>=22.13.0`。
+Node.js `>=22.13.0` is required.
 
 ```bash
 npm install
 npm run dev
 ```
 
-常用验证命令：
+Common validation commands:
 
 ```bash
 npm run lint
 npx tsc --noEmit
 npm test
+npm run build:vercel
 ```
 
-项目使用 Next.js App Router、React、TypeScript、Tailwind CSS 和 Canvas，并保留 Sites 所需的 vinext 构建与托管配置。
+The project uses Next.js App Router, React, TypeScript, Tailwind CSS, Canvas, and Three.js. The default build keeps the vinext output required by Sites, while `build:vercel` produces the standard Next.js output required by Vercel.

@@ -947,7 +947,7 @@ export default function Home() {
           : null;
     if (!canvas) return;
     const link = document.createElement("a");
-    link.download = "泥火间-手塑陶器.png";
+    link.download = "clay-and-fire-pottery.png";
     link.href = canvas.toDataURL("image/png");
     link.click();
   };
@@ -955,32 +955,32 @@ export default function Home() {
   const progressPercent = Math.round(fireProgress * 100);
   const canvasLabel =
     stage === "shape"
-      ? "可触摸塑形的陶坯。沿器身左右拖动改变轮廓。"
+      ? "A touch-responsive clay form. Drag its sides to reshape it."
       : stage === "write"
-        ? "可触摸题字的陶器。用手指在器身书写黑色毛笔字。"
-      : stage === "fire"
-        ? "窑火与陶器，火焰会随吹气强度变化。"
-        : "已经烧制完成的陶艺作品。";
+        ? "A touch-responsive vessel. Draw black brush marks with your finger."
+        : stage === "fire"
+          ? "A vessel in the kiln. The flames rise with your breath."
+          : "Your finished pottery piece.";
   const microphoneAnnouncement =
     micStatus === "ready"
-      ? "麦克风已就绪，可以吹气；也可以按住按钮烧制。"
+      ? "Microphone ready. Blow, or press and hold to fire."
       : micStatus === "calibrating"
-        ? "正在校准麦克风，请保持安静片刻。"
-      : micStatus === "denied" || micStatus === "unsupported"
-          ? "麦克风不可用，请按住按钮烧制。"
-          : "正在开启麦克风。";
+        ? "Calibrating. Stay quiet for a moment."
+        : micStatus === "denied" || micStatus === "unsupported"
+          ? "Microphone unavailable. Press and hold to fire."
+          : "Turning on the microphone.";
   const stageAnnouncement =
     stage === "shape"
-      ? "塑形。左右拖动陶器轮廓。"
+      ? "Shape. Drag the vessel's sides to sculpt it."
       : stage === "write"
-        ? "题字。用手指在陶器表面书写。"
-      : stage === "fire"
-        ? `烧制。${microphoneAnnouncement}`
-        : "陶器已经完成。";
+        ? "Write. Draw directly on the vessel."
+        : stage === "fire"
+          ? `Firing. ${microphoneAnnouncement}`
+          : "Your pottery is complete.";
 
   return (
     <main className={`experience stage-${stage}`}>
-      <section className="studio-shell" aria-label="泥火间陶艺工作室">
+      <section className="studio-shell" aria-label="Clay & Fire pottery studio">
         <header className="topbar">
           <h1 className="poster-title">{STAGE_TITLES[stage]}</h1>
         </header>
@@ -1020,7 +1020,7 @@ export default function Home() {
                 type="button"
                 className="primary-button"
                 onClick={enterWrite}
-                aria-label="完成塑形，开始题字"
+                aria-label="Finish shaping and add your mark"
               >
                 <span className="action-word" aria-hidden="true">Finish</span>
               </button>
@@ -1033,7 +1033,7 @@ export default function Home() {
                 type="button"
                 className="primary-button"
                 onClick={enterFire}
-                aria-label="完成题字，入窑烧制"
+                aria-label="Finish writing and fire the piece"
               >
                 <span className="action-word" aria-hidden="true">Fire</span>
               </button>
@@ -1045,7 +1045,7 @@ export default function Home() {
               <div
                 className="fire-meter"
                 role="progressbar"
-                aria-label="烧制进度"
+                aria-label="Firing progress"
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={progressPercent}
@@ -1064,7 +1064,7 @@ export default function Home() {
                 onLostPointerCapture={endManualFire}
                 onKeyDown={handleBreathKeyDown}
                 onKeyUp={handleBreathKeyUp}
-                aria-label="吹气或按住按钮烧制陶器"
+                aria-label="Blow or press and hold to fire the piece"
               >
                 <span className="action-word" aria-hidden="true">Blow</span>
               </button>
@@ -1079,7 +1079,7 @@ export default function Home() {
                 onClick={savePiece}
                 disabled={modelStatus === "loading"}
                 aria-busy={modelStatus === "loading"}
-                aria-label="保存成品图片"
+                aria-label="Save finished piece"
               >
                 <span className="action-word" aria-hidden="true">Save</span>
               </button>

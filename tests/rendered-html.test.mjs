@@ -29,22 +29,23 @@ test("server-renders the pottery studio shell and metadata", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<html lang="zh-CN"/i);
-  assert.match(html, /<title>泥火间 · 指尖陶艺模拟器<\/title>/i);
+  assert.match(html, /<html lang="en"/i);
+  assert.match(html, /<title>Clay &amp; Fire · Digital Pottery Studio<\/title>/i);
   assert.match(html, /Shape/);
   assert.match(html, /Finish/);
-  assert.doesNotMatch(html, /STEP|制作进度|窑温|器物编号/i);
-  assert.doesNotMatch(html, /上釉|釉色|glaze/i);
+  assert.doesNotMatch(html, /STEP|KILN TEMPERATURE|PIECE ID/i);
+  assert.doesNotMatch(html, /glaze/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
 test("ships shaping, incremental brush writing, firing, and a three-dimensional reveal", async () => {
-  const [page, model, layout, css, packageJson] = await Promise.all([
+  const [page, model, layout, css, packageJson, vercelConfig] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/PotteryModel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../vercel.json", import.meta.url), "utf8"),
   ]);
 
   const drawBrushLayerStart = page.indexOf("function drawBrushLayer");
@@ -150,7 +151,7 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   assert.doesNotMatch(`${page}\n${model}\n${css}`, /cooling|Cooling|cooling-veil|setTimeout/);
   assert.match(page, /onPointerDown=\{\(event\) => \{[\s\S]*?beginManualFire\(\);/);
   assert.match(page, /onPointerCancel=\{endManualFire\}/);
-  assert.match(page, /aria-label="吹气或按住按钮烧制陶器"/);
+  assert.match(page, /aria-label="Blow or press and hold to fire the piece"/);
   assert.doesNotMatch(page, /className="(?:canvas|write|fire)-hint"/);
   assert.doesNotMatch(css, /\.(?:canvas|write|fire)-hint/);
   assert.match(page, /className="fire-meter"[\s\S]*?role="progressbar"/);
@@ -342,13 +343,15 @@ test("ships shaping, incremental brush writing, firing, and a three-dimensional 
   assert.match(model, /renderer\.dispose\(\)/);
 
   assert.doesNotMatch(page, /for\s*\(let y = POT_TOP \+ 12; y < POT_BOTTOM; y \+= 11\)/);
-  assert.doesNotMatch(`${page}\n${model}\n${layout}\n${css}`, /glaze|上釉|釉色/i);
-  assert.match(layout, /lang="zh-CN"/);
+  assert.doesNotMatch(`${page}\n${model}\n${layout}\n${css}`, /glaze/i);
+  assert.match(layout, /lang="en"/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(packageJson, /"three"\s*:/);
+  assert.match(packageJson, /"build:vercel"\s*:\s*"next build"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(vercelConfig, /"buildCommand"\s*:\s*"npm run build:vercel"/);
 
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
